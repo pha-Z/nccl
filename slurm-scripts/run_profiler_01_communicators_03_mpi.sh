@@ -1,0 +1,54 @@
+#!/bin/bash
+
+#SBATCH --job-name=profiler_01_communicators_mpi
+#SBATCH --account=p_lv_nccl
+
+#SBATCH --time=00:10:00
+
+#SBATCH -e err_profiler_01_communicators_mpi-%J
+#SBATCH -o out_profiler_01_communicators_mpi-%J
+
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node=1
+#SBATCH --ntasks=2
+#SBATCH --cpus-per-task=6
+#SBATCH --mem-per-cpu=800 # megabytes
+#SBATCH --gres=gpu:1  # Multi-node: 1 GPU per node
+
+# --- Job Commands ---
+
+echo "loading modules..."
+module purge
+module load release/24.04 GCC/13.3.0 CUDA/12.6.0 OpenMPI/5.0.3
+
+export LD_LIBRARY_PATH=/data/cat/ws/s0949177-example_ws/nccl/build/lib:$LD_LIBRARY_PATH
+export NCCL_DEBUG=INFO
+
+# Paths - adjust these to match your environment
+NCCL_PATH="/data/cat/ws/s0949177-example_ws/nccl"
+NCCLINSPECTOR_PLUGIN="${NCCL_PATH}/ext-profiler/inspector/libnccl-profiler-inspector.so"
+NCCLEXAMPLE_PLUGIN="${NCCL_PATH}/ext-profiler/example/libnccl-profiler-example.so"
+
+# Example executable - adjust path as needed
+EXAMPLE_DIR="${NCCL_PATH}/examples/01_communicators/03_one_device_per_process_mpi"
+EXAMPLE_EXE="${EXAMPLE_DIR}/one_device_per_process_mpi"
+
+echo "== ncclinspector plugin =="
+export NCCL_PROFILER_PLUGIN="$NCCLINSPECTOR_PLUGIN"
+export NCCL_INSPECTOR_ENABLE=1
+export NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS=1000000 # 1 second
+export NCCL_INSPECTOR_DUMP_DIR="nccl-inspector-communicators-mpi-${SLURM_JOB_ID}"
+export NCCL_INSPECTOR_DUMP_VERBOSE=1  # Enable verbose for detailed event traces
+srun -N2 -n2 $EXAMPLE_EXE
+
+echo "== nccl example plugin =="
+export NCCL_PROFILER_PLUGIN="$NCCLEXAMPLE_PLUGIN"
+export NCCL_PROFILE_EVENT_MASK=4095  # all events enabled
+export NCCL_PROFILE_DUMP_FILE="nccl_example_plugin_communicators_mpi_${SLURM_JOB_ID}"
+unset NCCL_INSPECTOR_ENABLE
+unset NCCL_INSPECTOR_DUMP_DIR
+unset NCCL_INSPECTOR_DUMP_VERBOSE
+srun -N2 -n2 $EXAMPLE_EXE
+
+echo "success"
+
