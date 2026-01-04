@@ -12,7 +12,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=6
-#SBATCH --mem-per-cpu=800 # megabytes
+#SBATCH --mem-per-cpu=4000 # megabytes
 #SBATCH --gres=gpu:4
 
 # --- Job Commands ---
@@ -27,6 +27,7 @@ export NCCL_DEBUG=INFO
 # Paths
 NCCL_PATH="/data/cat/ws/s0949177-example_ws/nccl"
 NCCLINSPECTOR_PLUGIN="${NCCL_PATH}/ext-profiler/inspector/libnccl-profiler-inspector.so"
+NCCLMINIMAL_PLUGIN="${NCCL_PATH}/ext-profiler/minimal-profiler/libnccl-profiler-minimal.so"
 NCCLEXAMPLE_PLUGIN="${NCCL_PATH}/ext-profiler/example/libnccl-profiler-example.so"
 
 EXAMPLE_DIR="${NCCL_PATH}/examples/07_advanced_features/04_multi_stream"
@@ -38,6 +39,16 @@ export NCCL_INSPECTOR_ENABLE=1
 export NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS=1000000 # 1 second
 export NCCL_INSPECTOR_DUMP_DIR="nccl-inspector-multi-stream-${SLURM_JOB_ID}"
 export NCCL_INSPECTOR_DUMP_VERBOSE=1
+$EXAMPLE_EXE
+
+echo "== minimal profiler plugin =="
+export NCCL_PROFILER_PLUGIN="$NCCLMINIMAL_PLUGIN"
+export NCCL_PROFILE_EVENT_MASK=4095
+unset NCCL_INSPECTOR_ENABLE
+unset NCCL_INSPECTOR_DUMP_DIR
+unset NCCL_INSPECTOR_DUMP_VERBOSE
+unset NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS
+unset NCCL_PROFILE_DUMP_FILE
 $EXAMPLE_EXE
 
 echo "== nccl example plugin =="

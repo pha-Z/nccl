@@ -1,0 +1,2088 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NCCL Profiler Timeline Visualization</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 100%;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            color: #4ec9b0;
+            margin-bottom: 20px;
+        }
+        
+        .controls {
+            background: #252526;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, auto));
+            gap: 15px 20px;
+            align-items: start;
+        }
+        
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .control-group > label:first-child {
+            font-size: 12px;
+            color: #858585;
+            height: 16px;
+            line-height: 16px;
+        }
+        
+        .control-group.event-type-group {
+            grid-column: span 4;
+        }
+        
+        .control-group.time-range-group {
+            min-width: 180px;
+            max-width: 250px;
+        }
+        
+        .control-group.time-range-group > div {
+            display: flex;
+            gap: 5px;
+            width: 100%;
+        }
+        
+        .control-group.time-range-group input[type="number"] {
+            flex: 1;
+            min-width: 0;
+            width: auto;
+            box-sizing: border-box;
+        }
+        
+        .control-group.checkbox-option {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 5px;
+            padding-top: 21px;
+        }
+        
+        .control-group.checkbox-option label {
+            font-size: 12px;
+            color: #d4d4d4;
+            cursor: pointer;
+        }
+        
+        .type-filter-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            padding: 3px 8px;
+            background: #3c3c3c;
+            border-radius: 3px;
+            border: 1px solid #555;
+            cursor: pointer;
+            user-select: none;
+            font-size: 11px;
+            color: #d4d4d4;
+            min-width: 40px;
+            height: 24px;
+        }
+        
+        .type-filter-btn:hover {
+            background: #4a4a4a;
+            border-color: #666;
+        }
+        
+        .type-checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 8px;
+            background: #3c3c3c;
+            border-radius: 3px;
+            border: 1px solid #555;
+            cursor: pointer;
+            user-select: none;
+            font-size: 11px;
+            height: 24px;
+        }
+        
+        .type-checkbox-item:hover {
+            background: #4a4a4a;
+            border-color: #666;
+        }
+        
+        .type-checkbox-item input[type="checkbox"] {
+            margin: 0;
+            cursor: pointer;
+        }
+        
+        .type-checkbox-item input[type="checkbox"]:checked + span + label {
+            color: #4ec9b0;
+        }
+        
+        .type-checkbox-item label {
+            margin: 0;
+            cursor: pointer;
+            color: #d4d4d4;
+        }
+        
+        label {
+            font-size: 12px;
+            color: #858585;
+        }
+        
+        select, input[type="number"] {
+            background: #3c3c3c;
+            color: #d4d4d4;
+            border: 1px solid #555;
+            padding: 5px 10px;
+            border-radius: 3px;
+            height: 28px;
+        }
+        
+        input[type="range"] {
+            background: transparent;
+            height: 28px;
+        }
+        
+        #timeline-container {
+            background: #252526;
+            border-radius: 5px;
+            padding: 20px;
+            overflow-x: auto;
+            overflow-y: auto;
+            position: relative;
+            max-height: calc(100vh - 200px);
+        }
+        
+        #timeline-canvas {
+            display: block;
+            background: #1e1e1e;
+        }
+        
+        .legend {
+            background: #252526;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+        
+        .legend h3 {
+            color: #4ec9b0;
+            margin-bottom: 10px;
+        }
+        
+        .legend-items {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 10px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 3px;
+            border: 1px solid #555;
+        }
+        
+        .legend-label {
+            font-size: 12px;
+        }
+        
+        .visualization-elements {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+            margin-top: 10px;
+        }
+        
+        .element-item {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 10px;
+            background: #1e1e1e;
+            border-radius: 5px;
+            border: 1px solid #333;
+        }
+        
+        .element-visual {
+            flex-shrink: 0;
+            width: 50px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .element-bar {
+            width: 40px;
+            height: 16px;
+            background: #569cd6;
+            border: 1px solid #fff;
+            border-radius: 2px;
+        }
+        
+        .element-desc {
+            font-size: 12px;
+            color: #d4d4d4;
+            line-height: 1.4;
+        }
+        
+        .element-desc strong {
+            color: #4ec9b0;
+        }
+        
+        .info-panel {
+            background: #252526;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+            font-size: 12px;
+            position: sticky;
+            bottom: 0;
+            z-index: 100;
+            min-height: 50px;
+            box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.3);
+            width: 33%;
+            max-width: 500px;
+        }
+        
+        #info-text {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #858585;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>NCCL Profiler Timeline Visualization</h1>
+        
+        <div class="controls">
+            <div class="control-group">
+                <label>Filter by Communicator:</label>
+                <select id="commid-filter">
+                    <option value="all">All Communicators</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Filter by Rank:</label>
+                <select id="rank-filter">
+                    <option value="all">All Ranks</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Filter by Context:</label>
+                <select id="context-filter">
+                    <option value="all">All Contexts</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Filter by Thread ID:</label>
+                <select id="thread-filter">
+                    <option value="all">All Threads</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Filter by Process ID:</label>
+                <select id="pid-filter">
+                    <option value="all">All Processes</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Filter by GPU Device:</label>
+                <select id="device-filter">
+                    <option value="all">All Devices</option>
+                </select>
+            </div>
+            <div class="control-group event-type-group">
+                <label>Filter by Event Type:</label>
+                <div id="type-filter-checkboxes" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                    <!-- Buttons and checkboxes will be populated by JavaScript -->
+                </div>
+            </div>
+            <div class="control-group time-range-group">
+                <label>Time Range (μs):</label>
+                <div>
+                    <input type="number" id="time-min" placeholder="Min" step="1000">
+                    <input type="number" id="time-max" placeholder="Max" step="1000">
+                </div>
+            </div>
+            <div class="control-group">
+                <label>Lane Height:</label>
+                <input type="range" id="lane-height" min="20" max="100" value="40" style="width: 100px;">
+            </div>
+            <div class="control-group">
+                <label>Zoom:</label>
+                <input type="range" id="zoom" min="0.1" max="10" step="0.1" value="1" style="width: 100px;">
+            </div>
+            <div class="control-group checkbox-option">
+                <input type="checkbox" id="show-parent-arrows" checked>
+                <label for="show-parent-arrows">Show Parent-Child Arrows</label>
+            </div>
+            <div class="control-group checkbox-option">
+                <input type="checkbox" id="group-by-type" checked>
+                <label for="group-by-type">Allow Multiple Events per Lane (same type)</label>
+            </div>
+            <div class="control-group checkbox-option">
+                <input type="checkbox" id="normalize-time" checked>
+                <label for="normalize-time">Normalize Timeline (start at 0)</label>
+            </div>
+        </div>
+        
+        <div id="timeline-container">
+            <div class="loading">Loading timeline...</div>
+        </div>
+        
+        <div class="legend">
+            <h3>Visualization Elements</h3>
+            <div class="visualization-elements">
+                <div class="element-item">
+                    <div class="element-visual">
+                        <div class="element-bar"></div>
+                    </div>
+                    <div class="element-desc">
+                        <strong>Rectangular Bar:</strong> Event with both start and stop timestamps. Shows function name if space allows.
+                    </div>
+                </div>
+                <div class="element-item">
+                    <div class="element-visual">
+                        <svg width="30" height="20" style="display: block;">
+                            <polygon points="0,5 20,10 0,15" fill="#569cd6" stroke="#fff" stroke-width="1"/>
+                        </svg>
+                    </div>
+                    <div class="element-desc">
+                        <strong>Right-Pointing Triangle:</strong> Event with only start timestamp (started but stop is missing).
+                    </div>
+                </div>
+                <div class="element-item">
+                    <div class="element-visual">
+                        <svg width="30" height="20" style="display: block;">
+                            <polygon points="20,5 0,10 20,15" fill="#569cd6" stroke="#fff" stroke-width="1"/>
+                        </svg>
+                    </div>
+                    <div class="element-desc">
+                        <strong>Left-Pointing Triangle:</strong> Event with only stop timestamp (stopped but start is missing).
+                    </div>
+                </div>
+                <div class="element-item">
+                    <div class="element-visual">
+                        <svg width="30" height="20" style="display: block;">
+                            <circle cx="10" cy="10" r="6" fill="#569cd6" stroke="#fff" stroke-width="1"/>
+                        </svg>
+                    </div>
+                    <div class="element-desc">
+                        <strong>Circle/Dot:</strong> Event that has neither start nor stop timestamp. The event exists but has no temporal duration.
+                    </div>
+                </div>
+                <div class="element-item">
+                    <div class="element-visual">
+                        <svg width="30" height="20" style="display: block;" viewBox="0 -5 30 20">
+                            <line x1="10" y1="0" x2="10" y2="10" stroke="#569cd6" stroke-width="2"/>
+                            <circle cx="10" cy="0" r="3" fill="#ff6b6b" stroke="#fff" stroke-width="1"/>
+                        </svg>
+                    </div>
+                    <div class="element-desc">
+                        <strong>Small Circle Marker:</strong> State transition within event bounds (shown above the event bar).
+                    </div>
+                </div>
+                <div class="element-item">
+                    <div class="element-visual">
+                        <svg width="30" height="20" style="display: block;">
+                            <circle cx="10" cy="8" r="6" fill="#ff6b6b" stroke="#fff" stroke-width="1"/>
+                            <polygon points="10,14 7,18 13,18" fill="#ff6b6b" stroke="#fff" stroke-width="1"/>
+                        </svg>
+                    </div>
+                    <div class="element-desc">
+                        <strong>Speech Bubble:</strong> State transition that cannot be shown as a small marker on an event bar (because the event has incomplete bounds or the state is outside the event's time range).
+                    </div>
+                </div>
+            </div>
+            <div style="margin-top: 20px; padding: 15px; background: #1e1e1e; border-radius: 5px; border: 1px solid #333;">
+                <h4 style="color: #4ec9b0; margin-bottom: 10px;">About ProfilerLifecycle Events</h4>
+                <div style="font-size: 12px; color: #d4d4d4; line-height: 1.6;">
+                    <p><strong>ProfilerLifecycle</strong> events represent the profiler plugin's tracking period for a communicator on a specific rank:</p>
+                    <ul style="margin-left: 20px; margin-top: 8px;">
+                        <li><strong>profilerInit:</strong> Called for each rank when the communicator is initialized on that rank (always corresponds to comm initialization on that rank)</li>
+                        <li><strong>profilerFinalize:</strong> Called for each rank when the profiler stops tracking the communicator on that rank. This typically means the communicator is finalized/destroyed, but it may also be called when the communicator is only revoked (not fully destroyed/freed).</li>
+                    </ul>
+                    <p style="margin-top: 8px;">The bar spans from plugin initialization to finalization, showing the period during which the profiler was actively tracking this communicator on this rank.</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="info-panel">
+            <div id="info-text">Hover over events to see details</div>
+        </div>
+    </div>
+    
+    <script>
+        // Color palette for event types
+        const EVENT_COLORS = {
+            'ProfilerLifecycle': '#858585',  // Grey - profiler plugin tracking period (init to finalize)
+            'GroupApi': '#4ec9b0',
+            'CollApi': '#9333ea',
+            'P2pApi': '#c586c0',
+            'KernelLaunch': '#dcdcaa',
+            'Coll': '#c084fc',
+            'P2p': '#fda1f0',
+            'ProxyOp': '#f48771',
+            'ProxyStep': '#f48771',
+            'ProxyCtrl': '#f48771',
+            'KernelCh': '#569cd6',
+            'NetPlugin': '#569cd6',
+            'Group': '#4ec9b0',
+            'Unknown': '#858585'
+        };
+        
+        // Hover area expansion (in pixels) for easier hovering on small event bars
+        const HOVER_EXPAND = 5;
+        
+        let eventsData = null;
+        let filteredEvents = null;
+        let canvas = null;
+        let ctx = null;
+        let minTime = 0;
+        let maxTime = 0;
+        let laneHeight = 40;
+        let zoom = 1;
+        let panX = 0;
+        let isDragging = false;
+        let dragStartX = 0;
+        let hoveredEvent = null;
+        let highlightedEventKey = null; // Track clicked/highlighted event by key
+        let highlightedEvent = null; // Current highlighted event object (updated on render)
+        let highlightedStateKey = null; // Track clicked/highlighted state's event key
+        let highlightedStateIndex = null; // Track clicked/highlighted state's index within event
+        let showParentArrows = true;
+        let groupByType = true; // Default to new mode (group by rank+type)
+        let normalizeTime = true; // Default to normalized timeline (start at 0)
+        let isSelecting = false;
+        let selectionStartX = 0;
+        let selectionEndX = 0;
+        
+        // Helper function to normalize a timestamp (subtract global_min_time)
+        function normalizeTimestamp(timestamp) {
+            if (timestamp === null || timestamp === undefined) return timestamp;
+            if (!normalizeTime || !eventsData || eventsData.global_min_time === undefined) {
+                return timestamp;
+            }
+            return timestamp - eventsData.global_min_time;
+        }
+        
+        // Helper function to denormalize a timestamp (add global_min_time)
+        // Used when we have a normalized timestamp and need the absolute value
+        function denormalizeTimestamp(timestamp) {
+            if (timestamp === null || timestamp === undefined) return timestamp;
+            if (!eventsData || eventsData.global_min_time === undefined) {
+                return timestamp;
+            }
+            // If normalizeTime is true, inputs are normalized, so convert to absolute
+            // If normalizeTime is false, inputs are already absolute, so return as-is
+            if (normalizeTime) {
+                return timestamp + eventsData.global_min_time;
+            }
+            return timestamp;
+        }
+        
+        // Helper function to get normalized event (creates a copy with normalized timestamps)
+        function getNormalizedEvent(event) {
+            if (!normalizeTime || !eventsData || eventsData.global_min_time === undefined) {
+                return event;
+            }
+            
+            const normalized = { ...event };
+            if (normalized.start !== null && normalized.start !== undefined) {
+                normalized.start = normalizeTimestamp(normalized.start);
+            }
+            if (normalized.stop !== null && normalized.stop !== undefined) {
+                normalized.stop = normalizeTimestamp(normalized.stop);
+            }
+            if (normalized.states && normalized.states.length > 0) {
+                normalized.states = normalized.states.map(state => ({
+                    ...state,
+                    timestamp: normalizeTimestamp(state.timestamp)
+                }));
+            }
+            return normalized;
+        }
+        
+        // Load events data
+        async function loadEvents() {
+            try {
+                const response = await fetch('events_data.json');
+                eventsData = await response.json();
+                
+                // Calculate global_min_time from events (self-contained, doesn't rely on parser)
+                calculateGlobalMinTime();
+                
+                initializeFilters();
+                applyFilters(); // This will set filteredEvents and render the timeline
+            } catch (error) {
+                document.getElementById('timeline-container').innerHTML = 
+                    '<div class="loading" style="color: #f48771;">Error loading events_data.json. Please run parse_logs.py first.</div>';
+                console.error('Error loading events:', error);
+            }
+        }
+        
+        // Calculate global minimum timestamp from all events
+        // This makes the visualizer self-contained - it doesn't need parse_logs.py to pre-calculate this
+        function calculateGlobalMinTime() {
+            let minTimestamp = Infinity;
+            
+            for (const [key, event] of Object.entries(eventsData.events || {})) {
+                if (event.start !== null && event.start !== undefined) {
+                    minTimestamp = Math.min(minTimestamp, event.start);
+                }
+                if (event.stop !== null && event.stop !== undefined) {
+                    minTimestamp = Math.min(minTimestamp, event.stop);
+                }
+                if (event.states) {
+                    event.states.forEach(state => {
+                        if (state.timestamp !== null && state.timestamp !== undefined) {
+                            minTimestamp = Math.min(minTimestamp, state.timestamp);
+                        }
+                    });
+                }
+            }
+            
+            // Store calculated value (overrides any value from parser)
+            eventsData.global_min_time = minTimestamp !== Infinity ? minTimestamp : 0;
+            
+            console.log(`Calculated global_min_time: ${eventsData.global_min_time.toFixed(2)}μs`);
+        }
+        
+        function initializeFilters() {
+            const rankFilter = document.getElementById('rank-filter');
+            const contextFilter = document.getElementById('context-filter');
+            const threadFilter = document.getElementById('thread-filter');
+            const pidFilter = document.getElementById('pid-filter');
+            const typeFilterContainer = document.getElementById('type-filter-checkboxes');
+            
+            // Populate rank filter
+            // If ranks array is empty, try to extract from events
+            let ranks = eventsData.ranks || [];
+            if (ranks.length === 0) {
+                const rankSet = new Set();
+                Object.values(eventsData.events || {}).forEach(event => {
+                    if (event.rank !== undefined && event.rank !== null) {
+                        rankSet.add(event.rank);
+                    }
+                });
+                ranks = Array.from(rankSet).sort((a, b) => a - b);
+            }
+            ranks.forEach(rank => {
+                const option = document.createElement('option');
+                option.value = rank;
+                option.textContent = `Rank ${rank}`;
+                rankFilter.appendChild(option);
+            });
+            
+            // Populate context filter
+            eventsData.contexts.forEach(ctx => {
+                const option = document.createElement('option');
+                option.value = ctx;
+                option.textContent = `Context ${ctx}`;
+                contextFilter.appendChild(option);
+            });
+            
+            // Populate thread filter
+            if (eventsData.threads && eventsData.threads.length > 0) {
+                eventsData.threads.forEach(tid => {
+                    const option = document.createElement('option');
+                    option.value = tid;
+                    option.textContent = `Thread ${tid}`;
+                    threadFilter.appendChild(option);
+                });
+            }
+            
+            // Populate process ID filter
+            // If pids array is empty, try to extract from events
+            let pids = eventsData.pids || [];
+            if (pids.length === 0) {
+                const pidSet = new Set();
+                Object.values(eventsData.events || {}).forEach(event => {
+                    if (event.start_pid !== undefined && event.start_pid !== null) {
+                        pidSet.add(event.start_pid);
+                    }
+                    if (event.stop_pid !== undefined && event.stop_pid !== null) {
+                        pidSet.add(event.stop_pid);
+                    }
+                    if (event.states) {
+                        event.states.forEach(state => {
+                            if (state.pid !== undefined && state.pid !== null) {
+                                pidSet.add(state.pid);
+                            }
+                        });
+                    }
+                });
+                pids = Array.from(pidSet).sort((a, b) => a - b);
+            }
+            if (pids.length > 0) {
+                pids.forEach(pid => {
+                    const option = document.createElement('option');
+                    option.value = pid;
+                    option.textContent = `Process ${pid}`;
+                    pidFilter.appendChild(option);
+                });
+            }
+            
+            // Populate GPU device filter
+            const deviceFilter = document.getElementById('device-filter');
+            const deviceSet = new Set();
+            Object.values(eventsData.events || {}).forEach(event => {
+                if (event.device_id !== undefined && event.device_id !== null) {
+                    deviceSet.add(event.device_id);
+                }
+            });
+            const devices = Array.from(deviceSet).sort((a, b) => a - b);
+            if (devices.length > 0) {
+                devices.forEach(deviceId => {
+                    const option = document.createElement('option');
+                    option.value = deviceId;
+                    option.textContent = `GPU ${deviceId}`;
+                    deviceFilter.appendChild(option);
+                });
+            }
+            
+            // Populate communicator filter
+            const commidFilter = document.getElementById('commid-filter');
+            // If commids array is empty, try to extract from events
+            let commids = eventsData.commids || [];
+            if (commids.length === 0) {
+                const commidSet = new Set();
+                Object.values(eventsData.events || {}).forEach(event => {
+                    if (event.commid && event.commid !== 'unknown') {
+                        commidSet.add(event.commid);
+                    }
+                });
+                commids = Array.from(commidSet).sort();
+                // Also store back so other code can use it
+                eventsData.commids = commids;
+            }
+            if (commids.length > 0) {
+                commids.forEach((commid, idx) => {
+                    const option = document.createElement('option');
+                    option.value = commid;
+                    // Show shortened commid with index for readability
+                    const shortId = commid.length > 8 ? commid.slice(-8) : commid;
+                    option.textContent = `Comm #${idx + 1} (...${shortId})`;
+                    commidFilter.appendChild(option);
+                });
+            }
+            
+            // Populate type filter with checkboxes
+            const types = new Set();
+            Object.values(eventsData.events).forEach(event => {
+                if (event.type) types.add(event.type);
+            });
+            
+            // Add "Select All" / "Deselect All" buttons with same styling as checkboxes
+            const selectAllBtn = document.createElement('button');
+            selectAllBtn.textContent = 'All';
+            selectAllBtn.className = 'type-filter-btn';
+            selectAllBtn.onclick = () => {
+                Array.from(typeFilterContainer.querySelectorAll('input[type="checkbox"]')).forEach(cb => cb.checked = true);
+                applyFilters();
+            };
+            typeFilterContainer.appendChild(selectAllBtn);
+            
+            const deselectAllBtn = document.createElement('button');
+            deselectAllBtn.textContent = 'None';
+            deselectAllBtn.className = 'type-filter-btn';
+            deselectAllBtn.onclick = () => {
+                Array.from(typeFilterContainer.querySelectorAll('input[type="checkbox"]')).forEach(cb => cb.checked = false);
+                applyFilters();
+            };
+            typeFilterContainer.appendChild(deselectAllBtn);
+            
+            // Add checkboxes for each event type
+            // Sort types: ProfilerLifecycle first, then alphabetically
+            const sortedTypes = Array.from(types).sort((a, b) => {
+                // ProfilerLifecycle always goes first
+                if (a === 'ProfilerLifecycle' && b !== 'ProfilerLifecycle') return -1;
+                if (a !== 'ProfilerLifecycle' && b === 'ProfilerLifecycle') return 1;
+                
+                // Otherwise sort alphabetically
+                return a.localeCompare(b);
+            });
+            sortedTypes.forEach(type => {
+                const checkboxItem = document.createElement('div');
+                checkboxItem.className = 'type-checkbox-item';
+                
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.id = `type-filter-${type}`;
+                checkbox.value = type;
+                checkbox.checked = true; // All checked by default
+                checkbox.addEventListener('change', applyFilters);
+                
+                const label = document.createElement('label');
+                label.htmlFor = `type-filter-${type}`;
+                label.textContent = type;
+                
+                // Add color indicator
+                const colorBox = document.createElement('span');
+                colorBox.style.cssText = `width: 12px; height: 12px; background: ${EVENT_COLORS[type] || EVENT_COLORS['Unknown']}; border: 1px solid #555; border-radius: 2px; display: inline-block;`;
+                
+                checkboxItem.appendChild(checkbox);
+                checkboxItem.appendChild(colorBox);
+                checkboxItem.appendChild(label);
+                
+                // Make the entire box clickable (including color indicator)
+                checkboxItem.addEventListener('click', (e) => {
+                    // Don't toggle if clicking directly on the checkbox or label
+                    // (checkbox handles its own toggle, label uses htmlFor to toggle)
+                    if (e.target !== checkbox && e.target !== label) {
+                        checkbox.checked = !checkbox.checked;
+                        applyFilters();
+                    }
+                });
+                
+                typeFilterContainer.appendChild(checkboxItem);
+            });
+            
+            // Setup event listeners
+            rankFilter.addEventListener('change', applyFilters);
+            contextFilter.addEventListener('change', applyFilters);
+            threadFilter.addEventListener('change', applyFilters);
+            pidFilter.addEventListener('change', applyFilters);
+            commidFilter.addEventListener('change', applyFilters);
+            document.getElementById('device-filter').addEventListener('change', applyFilters);
+            // Type filter checkboxes already have event listeners attached above
+            document.getElementById('time-min').addEventListener('input', applyFilters);
+            document.getElementById('time-max').addEventListener('input', applyFilters);
+            document.getElementById('lane-height').addEventListener('input', (e) => {
+                laneHeight = parseInt(e.target.value);
+                renderTimeline();
+            });
+            document.getElementById('zoom').addEventListener('input', (e) => {
+                zoom = parseFloat(e.target.value);
+                renderTimeline();
+            });
+            document.getElementById('show-parent-arrows').addEventListener('change', (e) => {
+                showParentArrows = e.target.checked;
+                renderTimeline();
+            });
+            document.getElementById('group-by-type').addEventListener('change', (e) => {
+                groupByType = e.target.checked;
+                renderTimeline();
+            });
+            document.getElementById('normalize-time').addEventListener('change', (e) => {
+                const wasNormalized = normalizeTime;
+                normalizeTime = e.target.checked;
+                
+                // Convert current time range inputs to maintain the same slice
+                const timeMinInput = document.getElementById('time-min');
+                const timeMaxInput = document.getElementById('time-max');
+                const currentMin = parseFloat(timeMinInput.value) || null;
+                const currentMax = parseFloat(timeMaxInput.value) || null;
+                
+                if (eventsData && eventsData.global_min_time !== undefined) {
+                    const offset = eventsData.global_min_time;
+                    
+                    if (currentMin !== null) {
+                        if (wasNormalized && !normalizeTime) {
+                            // Converting from normalized to absolute: add offset
+                            timeMinInput.value = Math.round(currentMin + offset);
+                        } else if (!wasNormalized && normalizeTime) {
+                            // Converting from absolute to normalized: subtract offset
+                            timeMinInput.value = Math.round(currentMin - offset);
+                        }
+                    }
+                    
+                    if (currentMax !== null) {
+                        if (wasNormalized && !normalizeTime) {
+                            // Converting from normalized to absolute: add offset
+                            timeMaxInput.value = Math.round(currentMax + offset);
+                        } else if (!wasNormalized && normalizeTime) {
+                            // Converting from absolute to normalized: subtract offset
+                            timeMaxInput.value = Math.round(currentMax - offset);
+                        }
+                    }
+                }
+                
+                applyFilters();
+            });
+        }
+        
+        function applyFilters() {
+            const rankFilter = document.getElementById('rank-filter').value;
+            const contextFilter = document.getElementById('context-filter').value;
+            const threadFilter = document.getElementById('thread-filter').value;
+            const pidFilter = document.getElementById('pid-filter').value;
+            const commidFilter = document.getElementById('commid-filter').value;
+            const deviceFilter = document.getElementById('device-filter').value;
+            let timeMin = parseFloat(document.getElementById('time-min').value) || null;
+            let timeMax = parseFloat(document.getElementById('time-max').value) || null;
+            
+            // Convert time filter inputs to absolute time for comparison with raw events
+            // If normalization is enabled, the inputs are in normalized time, so convert to absolute
+            if (normalizeTime && eventsData && eventsData.global_min_time !== undefined) {
+                if (timeMin !== null) {
+                    timeMin = denormalizeTimestamp(timeMin);
+                }
+                if (timeMax !== null) {
+                    timeMax = denormalizeTimestamp(timeMax);
+                }
+            }
+            
+            // Get selected event types from checkboxes
+            const selectedTypes = new Set();
+            document.querySelectorAll('#type-filter-checkboxes input[type="checkbox"]:checked').forEach(checkbox => {
+                selectedTypes.add(checkbox.value);
+            });
+            
+            // Filter events using absolute timestamps
+            filteredEvents = Object.entries(eventsData.events).filter(([key, event]) => {
+                if (rankFilter !== 'all' && event.rank !== parseInt(rankFilter)) return false;
+                if (contextFilter !== 'all' && event.ctx !== contextFilter) return false;
+                
+                // Thread filter: match if start_tid, stop_tid, or any state tid matches
+                if (threadFilter !== 'all') {
+                    const tid = parseInt(threadFilter);
+                    const hasMatchingTid = 
+                        event.start_tid === tid || 
+                        event.stop_tid === tid ||
+                        (event.states && event.states.some(s => s.tid === tid));
+                    if (!hasMatchingTid) return false;
+                }
+                
+                // Process ID filter: match if start_pid, stop_pid, or any state pid matches
+                if (pidFilter !== 'all') {
+                    const pid = parseInt(pidFilter);
+                    const hasMatchingPid = 
+                        event.start_pid === pid || 
+                        event.stop_pid === pid ||
+                        (event.states && event.states.some(s => s.pid === pid));
+                    if (!hasMatchingPid) return false;
+                }
+                
+                // Communicator filter
+                if (commidFilter !== 'all' && event.commid !== commidFilter) return false;
+                
+                // GPU device filter
+                if (deviceFilter !== 'all') {
+                    const deviceId = parseInt(deviceFilter);
+                    if (event.device_id === undefined || event.device_id === null || event.device_id !== deviceId) {
+                        return false;
+                    }
+                }
+                
+                if (selectedTypes.size > 0 && !selectedTypes.has(event.type)) return false;
+                
+                // Time filtering: compare against absolute timestamps
+                if (timeMin !== null && event.stop !== null && event.stop < timeMin) return false;
+                if (timeMax !== null && event.start !== null && event.start > timeMax) return false;
+                return true;
+            }).map(([key, event]) => {
+                // Return normalized event for display
+                return [key, getNormalizedEvent(event)];
+            });
+            
+            renderTimeline();
+        }
+        
+        function calculateTimeRange() {
+            minTime = Infinity;
+            maxTime = -Infinity;
+            
+            filteredEvents.forEach(([key, event]) => {
+                if (event.start !== null) {
+                    minTime = Math.min(minTime, event.start);
+                    maxTime = Math.max(maxTime, event.start);
+                }
+                if (event.stop !== null) {
+                    minTime = Math.min(minTime, event.stop);
+                    maxTime = Math.max(maxTime, event.stop);
+                }
+                event.states.forEach(state => {
+                    minTime = Math.min(minTime, state.timestamp);
+                    maxTime = Math.max(maxTime, state.timestamp);
+                });
+            });
+            
+            if (minTime === Infinity) {
+                minTime = 0;
+                maxTime = 1000;
+            }
+            
+            // Add padding
+            const padding = (maxTime - minTime) * 0.1;
+            minTime -= padding;
+            maxTime += padding;
+        }
+        
+        // Helper function to get event time bounds (already normalized if normalizeTime is true)
+        function getEventBounds(event) {
+            const eventStart = event.start !== null ? event.start : 
+                (event.stop !== null ? event.stop - 1000 : 
+                (event.states.length > 0 ? event.states[0].timestamp - 1000 : 0));
+            const eventEnd = event.stop !== null ? event.stop : 
+                (event.start !== null ? event.start + 1000 : 
+                (event.states.length > 0 ? event.states[event.states.length - 1].timestamp + 1000 : eventStart + 1000));
+            return { start: eventStart, end: eventEnd };
+        }
+        
+        // Helper function to check if two events overlap
+        function eventsOverlap(event1, event2) {
+            const bounds1 = getEventBounds(event1);
+            const bounds2 = getEventBounds(event2);
+            return !(bounds1.end < bounds2.start || bounds1.start > bounds2.end);
+        }
+        
+        // Preferred event type order for lane organization
+        function getEventTypePriority(eventType) {
+            const priorityOrder = [
+                'ProfilerLifecycle',  // Profiler lifecycle events first
+                'GroupApi',
+                'CollApi',
+                'P2pApi',
+                'KernelLaunch',
+                'Group',
+                'Coll',
+                'P2p',
+                'ProxyCtrl',
+                'ProxyOp',
+                'ProxyStep',
+                'NetPlugin',
+                'KernelCh'
+            ];
+            const index = priorityOrder.indexOf(eventType);
+            // If type not in priority list, put it at the end (high priority number)
+            return index !== -1 ? index : priorityOrder.length;
+        }
+        
+        function organizeLanesByType() {
+            // Group events by communicator, rank and event type, then assign lanes within each group
+            // Events of the same communicator && same rank && same type && non-overlapping go on the same lane
+            // Concurrent events (overlapping) go on different lanes
+            // When a new event comes after concurrent events, prefer the first lane of that type
+            // Lanes are ordered by communicator first, then rank, then by preferred event type order
+            const lanes = [];
+            const eventToLane = new Map();
+            
+            // Group events by communicator, rank and type
+            const groups = new Map();
+            filteredEvents.forEach(([key, event]) => {
+                const eventType = event.type || 'Unknown';
+                const commid = event.commid || 'unknown';
+                const groupKey = `comm${commid}_rank${event.rank}_type${eventType}`;
+                if (!groups.has(groupKey)) {
+                    groups.set(groupKey, []);
+                }
+                groups.get(groupKey).push([key, event]);
+            });
+            
+            // Track which lanes belong to which comm+rank+type combination
+            // Map: groupKey -> array of lane indices for that group
+            const groupLanes = new Map();
+            
+            // Process each group separately
+            Array.from(groups.entries()).sort((a, b) => {
+                // Sort by communicator first, then rank, then by preferred type order
+                const commidA = a[1][0][1].commid || 'unknown';
+                const commidB = b[1][0][1].commid || 'unknown';
+                if (commidA !== commidB) {
+                    // Sort communicators by their index in eventsData.commids if available
+                    if (eventsData.commids) {
+                        const idxA = eventsData.commids.indexOf(commidA);
+                        const idxB = eventsData.commids.indexOf(commidB);
+                        if (idxA !== -1 && idxB !== -1) {
+                            if (idxA !== idxB) return idxA - idxB;
+                        } else if (idxA !== -1) return -1;
+                        else if (idxB !== -1) return 1;
+                    }
+                    return commidA.localeCompare(commidB);
+                }
+                
+                const rankA = a[1][0][1].rank;
+                const rankB = b[1][0][1].rank;
+                if (rankA !== rankB) return rankA - rankB;
+                
+                const typeA = a[1][0][1].type || 'Unknown';
+                const typeB = b[1][0][1].type || 'Unknown';
+                const priorityA = getEventTypePriority(typeA);
+                const priorityB = getEventTypePriority(typeB);
+                
+                // If priorities are equal, sort alphabetically
+                if (priorityA !== priorityB) return priorityA - priorityB;
+                return typeA.localeCompare(typeB);
+            }).forEach(([groupKey, groupEvents]) => {
+                // Initialize lane tracking for this group
+                if (!groupLanes.has(groupKey)) {
+                    groupLanes.set(groupKey, []);
+                }
+                const groupLaneIndices = groupLanes.get(groupKey);
+                
+                // Sort events in this group by start time
+                const sortedEvents = groupEvents.sort((a, b) => {
+                    const boundsA = getEventBounds(a[1]);
+                    const boundsB = getEventBounds(b[1]);
+                    return boundsA.start - boundsB.start;
+                });
+                
+                // Assign lanes within this group
+                sortedEvents.forEach(([key, event]) => {
+                    const eventBounds = getEventBounds(event);
+                    
+                    let assignedLane = -1;
+                    
+                    if (groupByType) {
+                        // Mode: Allow multiple non-overlapping events of same type on same lane
+                        // Try to find an existing lane of this comm+rank+type that doesn't have overlapping events
+                        // Prefer the first lane (lowest index) of this type
+                        
+                        // Check existing lanes for this group (sorted by index, so first match is the "first" lane)
+                        for (const laneIndex of groupLaneIndices) {
+                            const laneEvents = lanes[laneIndex];
+                            
+                            // Check if this event overlaps with any event in this lane
+                            const hasOverlap = laneEvents.some(([otherKey, otherEvent]) => {
+                                return eventsOverlap(event, otherEvent);
+                            });
+                            
+                            if (!hasOverlap) {
+                                // Found a non-overlapping lane - use it (this is the first available)
+                                assignedLane = laneIndex;
+                                break;
+                            }
+                        }
+                    } else {
+                        // Mode: One event per lane (no "stuffing" - creates nice reading direction)
+                        // Always create a new lane for each event
+                    }
+                    
+                    // If no existing lane works (or if groupByType is false), create a new one
+                    if (assignedLane === -1) {
+                        assignedLane = lanes.length;
+                        lanes.push([]);
+                        groupLaneIndices.push(assignedLane);
+                    }
+                    
+                    lanes[assignedLane].push([key, event]);
+                    eventToLane.set(key, assignedLane);
+                });
+            });
+            
+            return { lanes, eventToLane };
+        }
+        
+        function organizeLanesByCommContext() {
+            // Group events by communicator, context and rank first, then assign lanes within each group
+            // This is the old/original lane organization mode
+            const lanes = [];
+            const eventToLane = new Map();
+            
+            // Group events by commid, context and rank
+            const groups = new Map();
+            filteredEvents.forEach(([key, event]) => {
+                // Include commid in grouping to separate events from different communicators
+                const groupKey = `comm${event.commid || 'unknown'}_${event.ctx}_rank${event.rank}`;
+                if (!groups.has(groupKey)) {
+                    groups.set(groupKey, []);
+                }
+                groups.get(groupKey).push([key, event]);
+            });
+            
+            // Process each group separately to keep them visually together
+            Array.from(groups.entries()).sort((a, b) => {
+                // Sort by rank first, then context
+                const rankA = a[1][0][1].rank;
+                const rankB = b[1][0][1].rank;
+                if (rankA !== rankB) return rankA - rankB;
+                return a[0].localeCompare(b[0]);
+            }).forEach(([groupKey, groupEvents]) => {
+                // Sort events in this group by start time
+                const sortedEvents = groupEvents.sort((a, b) => {
+                    const boundsA = getEventBounds(a[1]);
+                    const boundsB = getEventBounds(b[1]);
+                    return boundsA.start - boundsB.start;
+                });
+                
+                // Assign lanes within this group (simple algorithm: assign to first available lane)
+                sortedEvents.forEach(([key, event]) => {
+                    const eventBounds = getEventBounds(event);
+                    
+                    // Find first lane in current group that doesn't overlap
+                    let assignedLane = -1;
+                    
+                    for (let i = 0; i < lanes.length; i++) {
+                        const laneEvents = lanes[i];
+                        // Check if this lane belongs to the same group
+                        if (laneEvents.length > 0) {
+                            const firstEvent = laneEvents[0][1];
+                            const laneGroupKey = `comm${firstEvent.commid || 'unknown'}_${firstEvent.ctx}_rank${firstEvent.rank}`;
+                            if (laneGroupKey !== groupKey) continue;
+                        }
+                        
+                        const overlaps = laneEvents.some(([otherKey, otherEvent]) => {
+                            return eventsOverlap(event, otherEvent);
+                        });
+                        if (!overlaps) {
+                            assignedLane = i;
+                            break;
+                        }
+                    }
+                    
+                    if (assignedLane === -1) {
+                        assignedLane = lanes.length;
+                        lanes.push([]);
+                    }
+                    
+                    lanes[assignedLane].push([key, event]);
+                    eventToLane.set(key, assignedLane);
+                });
+            });
+            
+            return { lanes, eventToLane };
+        }
+        
+        function organizeLanes() {
+            // Always use comm+rank+type grouping with preferred type order
+            // The toggle controls whether we allow multiple non-overlapping events per lane
+            // (groupByType=true) or force one event per lane (groupByType=false)
+            return organizeLanesByType();
+        }
+        
+        function timeToX(time) {
+            // Calculate X position based on time
+            // Canvas width is already scaled by zoom, so we map time directly to canvas coordinates
+            return ((time - minTime) / (maxTime - minTime)) * canvas.width + panX;
+        }
+        
+        function xToTime(x) {
+            // Convert X position back to time
+            // Inverse of timeToX
+            return minTime + ((x - panX) / canvas.width) * (maxTime - minTime);
+        }
+        
+        function drawParentChildArrows(lanes, eventToLane, renderedEventsMap) {
+            if (!eventsData.parent_child_map || !eventsData.events) return;
+            
+            ctx.globalAlpha = 0.6; // Semi-transparent so arrows don't obscure events
+            ctx.strokeStyle = '#9cdcfe';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 4]); // Dashed line for arrows
+            
+            // Draw arrows for each parent-child relationship
+            Object.entries(eventsData.parent_child_map).forEach(([parentId, childIds]) => {
+                // Look up from rendered events map (filtered events with bounds)
+                const parentEvent = renderedEventsMap.get(parentId);
+                if (!parentEvent || !parentEvent._bounds) return;
+                
+                childIds.forEach(childId => {
+                    const childEvent = renderedEventsMap.get(childId);
+                    if (!childEvent || !childEvent._bounds) return;
+                    
+                    // Get parent and child positions
+                    const parentLane = eventToLane.get(parentId);
+                    const childLane = eventToLane.get(childId);
+                    
+                    if (parentLane === undefined || childLane === undefined) return;
+                    
+                    const parentY = 40 + parentLane * laneHeight + laneHeight / 2;
+                    const childY = 40 + childLane * laneHeight + laneHeight / 2;
+                    
+                    // Use the center of the event bar for connection points
+                    const parentX = parentEvent._bounds.startX !== undefined && parentEvent._bounds.endX !== undefined
+                        ? (parentEvent._bounds.startX + parentEvent._bounds.endX) / 2
+                        : (parentEvent._bounds.startX || parentEvent._bounds.endX || 0);
+                    
+                    const childX = childEvent._bounds.startX !== undefined && childEvent._bounds.endX !== undefined
+                        ? (childEvent._bounds.startX + childEvent._bounds.endX) / 2
+                        : (childEvent._bounds.startX || childEvent._bounds.endX || 0);
+                    
+                    // Draw curved arrow using Bezier curve
+                    // Control points for smooth curve
+                    const midX = (parentX + childX) / 2;
+                    const controlY1 = parentY + (childY > parentY ? 20 : -20);
+                    const controlY2 = childY + (childY > parentY ? -20 : 20);
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(parentX, parentY);
+                    // Use Bezier curve for smooth connection
+                    ctx.bezierCurveTo(
+                        midX, controlY1,
+                        midX, controlY2,
+                        childX, childY
+                    );
+                    ctx.stroke();
+                    
+                    // Draw arrowhead at child end
+                    const angle = Math.atan2(childY - controlY2, childX - midX);
+                    const arrowLength = 8;
+                    const arrowWidth = 4;
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(childX, childY);
+                    ctx.lineTo(
+                        childX - arrowLength * Math.cos(angle - Math.PI / 6),
+                        childY - arrowLength * Math.sin(angle - Math.PI / 6)
+                    );
+                    ctx.moveTo(childX, childY);
+                    ctx.lineTo(
+                        childX - arrowLength * Math.cos(angle + Math.PI / 6),
+                        childY - arrowLength * Math.sin(angle + Math.PI / 6)
+                    );
+                    ctx.stroke();
+                });
+            });
+            
+            ctx.setLineDash([]); // Reset line dash
+            ctx.globalAlpha = 1.0; // Reset opacity
+        }
+        
+        /**
+         * Draw visualization elements for an event.
+         * 
+         * Visualization Elements Used:
+         * 1. RECTANGULAR BARS: For events with both start and stop timestamps
+         *    - Full-width colored rectangle spanning from start to stop time
+         *    - Shows function name label if space allows
+         * 
+         * 2. RIGHT-POINTING TRIANGLES: For events with only start timestamp
+         *    - Triangle pointing right, indicating event started but hasn't stopped
+         *    - Positioned at the start timestamp
+         * 
+         * 3. LEFT-POINTING TRIANGLES: For events with only stop timestamp
+         *    - Triangle pointing left, indicating event stopped but start is missing
+         *    - Positioned at the stop timestamp
+         * 
+         * 4. CIRCLES/DOTS: For events with no start or stop timestamps
+         *    - Small circle positioned at first state timestamp (or default position)
+         *    - Used for events that only have state transitions
+         * 
+         * 5. STATE MARKERS (two types):
+         *    a) SPEECH BUBBLES: For standalone states or states outside event bounds
+         *       - Red circular bubble with a small pointer triangle below
+         *       - Indicates state transition that's not part of a complete event
+         *    b) SMALL CIRCLES: For states within event bounds
+         *       - Small red dot positioned above the event bar
+         *       - Marks state transitions that occur during an event's lifetime
+         */
+        function drawBar(event, lane, y, isHovered = false, isHighlighted = false, highlightedStateIdx = null) {
+            const height = laneHeight * 0.8;
+            const centerY = y + laneHeight / 2;
+            const color = EVENT_COLORS[event.type] || EVENT_COLORS['Unknown'];
+            
+            // Determine stroke style based on hover/highlight state
+            let strokeStyle = '#fff';
+            let lineWidth = 1;
+            if (isHighlighted) {
+                strokeStyle = '#9cdcfe'; // Light blue for highlighted
+                lineWidth = 3;
+            } else if (isHovered) {
+                strokeStyle = '#dcdcaa'; // Yellow for hovered
+                lineWidth = 2;
+            }
+            
+            let startX, endX;
+            
+            if (event.start !== null && event.stop !== null) {
+                // 1. FULL BAR - both start and end exist
+                startX = timeToX(event.start);
+                endX = timeToX(event.stop);
+                const width = endX - startX;
+                
+                ctx.fillStyle = color;
+                ctx.fillRect(startX, centerY - height/2, width, height);
+                ctx.strokeStyle = strokeStyle;
+                ctx.lineWidth = lineWidth;
+                ctx.strokeRect(startX, centerY - height/2, width, height);
+                
+                // Draw label if space allows
+                if (width > 50) {
+                    ctx.fillStyle = '#fff';
+                    ctx.font = '10px monospace';
+                    const label = event.func || event.type;
+                    ctx.fillText(label, startX + 5, centerY + 3);
+                }
+            } else if (event.start !== null) {
+                // 2. RIGHT-POINTING TRIANGLE (only start exists)
+                startX = timeToX(event.start);
+                endX = startX + height;
+                
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                ctx.moveTo(startX, centerY - height/2);
+                ctx.lineTo(startX + height, centerY);
+                ctx.lineTo(startX, centerY + height/2);
+                ctx.closePath();
+                ctx.fill();
+                ctx.strokeStyle = strokeStyle;
+                ctx.lineWidth = lineWidth;
+                ctx.stroke();
+            } else if (event.stop !== null) {
+                // 3. LEFT-POINTING TRIANGLE (only stop exists)
+                endX = timeToX(event.stop);
+                startX = endX - height;
+                
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                ctx.moveTo(endX, centerY - height/2);
+                ctx.lineTo(endX - height, centerY);
+                ctx.lineTo(endX, centerY + height/2);
+                ctx.closePath();
+                ctx.fill();
+                ctx.strokeStyle = strokeStyle;
+                ctx.lineWidth = lineWidth;
+                ctx.stroke();
+            } else {
+                // 4. CIRCLE/DOT (no start or stop - use first state timestamp or default)
+                const firstState = event.states.length > 0 ? event.states[0].timestamp : minTime;
+                startX = timeToX(firstState);
+                endX = startX + height;
+                
+                // Draw as a small circle/dot
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                ctx.arc(startX, centerY, 6, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = strokeStyle;
+                ctx.lineWidth = lineWidth;
+                ctx.stroke();
+            }
+            
+            // 5. STATE MARKERS - Draw state transitions
+            const stateBounds = [];
+            event.states.forEach((state, stateIdx) => {
+                const stateX = timeToX(state.timestamp);
+                const isStateHighlighted = highlightedStateIdx === stateIdx;
+                
+                // Determine stroke style for highlighted state
+                let stateStrokeStyle = '#fff';
+                let stateLineWidth = 1;
+                if (isStateHighlighted) {
+                    stateStrokeStyle = '#9cdcfe'; // Light blue for highlighted
+                    stateLineWidth = 3;
+                }
+                
+                // Check if this state is within the event bounds
+                const isWithinEvent = (event.start !== null && state.timestamp >= event.start) ||
+                                    (event.stop !== null && state.timestamp <= event.stop);
+                
+                if (!isWithinEvent || event.start === null || event.stop === null) {
+                    // 5a. SPEECH BUBBLE - Standalone state or state outside event bounds
+                    const bubbleSize = isStateHighlighted ? 10 : 8; // Slightly larger when highlighted
+                    const bubbleY = centerY - bubbleSize;
+                    
+                    ctx.fillStyle = '#ff6b6b';
+                    ctx.beginPath();
+                    // Bubble body
+                    ctx.arc(stateX, bubbleY, bubbleSize, 0, Math.PI * 2);
+                    ctx.fill();
+                    // Bubble pointer
+                    ctx.beginPath();
+                    ctx.moveTo(stateX, bubbleY + bubbleSize);
+                    ctx.lineTo(stateX - 3, centerY);
+                    ctx.lineTo(stateX + 3, centerY);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.strokeStyle = stateStrokeStyle;
+                    ctx.lineWidth = stateLineWidth;
+                    ctx.stroke();
+                    
+                    // Store bounds for hover detection (bubble + pointer area)
+                    stateBounds.push({
+                        x: stateX - bubbleSize,
+                        y: bubbleY - bubbleSize,
+                        width: bubbleSize * 2,
+                        height: centerY - (bubbleY - bubbleSize),
+                        state: state,
+                        stateIndex: stateIdx
+                    });
+                } else {
+                    // 5b. SMALL CIRCLE - State within event bounds (marker on top of bar)
+                    const markerY = centerY - height/2 - 5;
+                    const markerRadius = isStateHighlighted ? 5 : 3; // Larger when highlighted
+                    ctx.fillStyle = '#ff6b6b';
+                    ctx.beginPath();
+                    ctx.arc(stateX, markerY, markerRadius, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = stateStrokeStyle;
+                    ctx.lineWidth = stateLineWidth;
+                    ctx.stroke();
+                    
+                    // Store bounds for hover detection (small circle)
+                    stateBounds.push({
+                        x: stateX - markerRadius,
+                        y: markerY - markerRadius,
+                        width: markerRadius * 2,
+                        height: markerRadius * 2,
+                        state: state,
+                        stateIndex: stateIdx
+                    });
+                }
+            });
+            
+            return { startX, endX, y: centerY - height/2, height, stateBounds };
+        }
+        
+        function renderTimeline() {
+            const container = document.getElementById('timeline-container');
+            
+            // Save scroll position before re-rendering
+            const savedScrollLeft = container.scrollLeft;
+            const savedScrollTop = container.scrollTop;
+            
+            if (!filteredEvents || filteredEvents.length === 0) {
+                container.innerHTML = 
+                    '<div class="loading">No events to display</div>';
+                // Restore scroll position
+                container.scrollLeft = savedScrollLeft;
+                container.scrollTop = savedScrollTop;
+                return;
+            }
+            
+            container.innerHTML = '<canvas id="timeline-canvas"></canvas>';
+            canvas = document.getElementById('timeline-canvas');
+            ctx = canvas.getContext('2d');
+            
+            calculateTimeRange();
+            const { lanes, eventToLane } = organizeLanes();
+            
+            // Restore highlighted event from key (if it still exists in filtered events)
+            highlightedEvent = null;
+            if (highlightedEventKey) {
+                // Check if the highlighted event still exists in filtered events
+                const stillExists = filteredEvents.some(([key, event]) => key === highlightedEventKey);
+                if (!stillExists) {
+                    // Event was filtered out, clear the highlight
+                    highlightedEventKey = null;
+                }
+            }
+            
+            // Restore highlighted state (if it still exists in filtered events)
+            if (highlightedStateKey) {
+                const stillExists = filteredEvents.some(([key, event]) => {
+                    if (key === highlightedStateKey && event.states && event.states.length > highlightedStateIndex) {
+                        return true;
+                    }
+                    return false;
+                });
+                if (!stillExists) {
+                    // State was filtered out, clear the highlight
+                    highlightedStateKey = null;
+                    highlightedStateIndex = null;
+                }
+            }
+            
+            // Map to track rendered events (key -> event with bounds) for arrow drawing
+            const renderedEventsMap = new Map();
+            
+            // Set canvas size - make it wider if zoomed in to enable horizontal scrolling
+            const containerWidth = container.clientWidth - 40;
+            // Canvas width scales with zoom: when zoomed in, canvas is wider for horizontal scrolling
+            const canvasWidth = containerWidth * zoom;
+            const containerHeight = Math.max(400, lanes.length * laneHeight + 100);
+            canvas.width = canvasWidth;
+            canvas.height = containerHeight;
+            
+            // Clear canvas
+            ctx.fillStyle = '#1e1e1e';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw time axis
+            ctx.strokeStyle = '#555';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(0, 20);
+            ctx.lineTo(canvas.width, 20);
+            ctx.stroke();
+            
+            // Draw time labels
+            ctx.fillStyle = '#858585';
+            ctx.font = '12px monospace';
+            const numLabels = 10;
+            for (let i = 0; i <= numLabels; i++) {
+                const time = minTime + (maxTime - minTime) * (i / numLabels);
+                const x = (i / numLabels) * canvas.width + panX;
+                if (x >= 0 && x <= canvas.width) {
+                    ctx.fillText(`${time.toFixed(0)}μs`, x, 15);
+                    ctx.beginPath();
+                    ctx.moveTo(x, 20);
+                    ctx.lineTo(x, 25);
+                    ctx.stroke();
+                }
+            }
+            
+            // First pass: Draw events and calculate bounds (needed for arrow drawing)
+            lanes.forEach((laneEvents, laneIndex) => {
+                const y = 40 + laneIndex * laneHeight;
+                
+                // Draw lane background
+                ctx.fillStyle = '#252526';
+                ctx.fillRect(0, y, canvas.width, laneHeight);
+                
+                // Draw lane separator
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(0, y + laneHeight);
+                ctx.lineTo(canvas.width, y + laneHeight);
+                ctx.stroke();
+                
+                // Draw lane label
+                if (laneEvents.length > 0) {
+                    const firstEvent = laneEvents[0][1];
+                    
+                    // Check if all events in lane have the same thread ID
+                    const tids = new Set();
+                    laneEvents.forEach(([k, e]) => {
+                        if (e.start_tid !== undefined && e.start_tid !== null) tids.add(e.start_tid);
+                        if (e.stop_tid !== undefined && e.stop_tid !== null) tids.add(e.stop_tid);
+                    });
+                    
+                    // Get communicator info (show first, as it's hierarchically above rank)
+                    let commLabel = '';
+                    if (firstEvent.commid && firstEvent.commid !== 'unknown') {
+                        if (eventsData.commids && eventsData.commids.length > 0) {
+                        const commIdx = eventsData.commids.indexOf(firstEvent.commid) + 1;
+                            if (commIdx > 0) {
+                        commLabel = `Comm#${commIdx}`;
+                            } else {
+                                // CommId not in list, show short version
+                                const shortId = firstEvent.commid.length > 6 ? '...' + firstEvent.commid.slice(-6) : firstEvent.commid;
+                                commLabel = `Comm(${shortId})`;
+                            }
+                        } else {
+                            // No commids list, show short version of this commid
+                            const shortId = firstEvent.commid.length > 6 ? '...' + firstEvent.commid.slice(-6) : firstEvent.commid;
+                            commLabel = `Comm(${shortId})`;
+                        }
+                    } else {
+                        commLabel = 'Comm?';
+                    }
+                    
+                    // Get context info (short version)
+                    let ctxLabel = '';
+                    if (firstEvent.ctx) {
+                        const shortCtx = firstEvent.ctx.length > 8 ? '...' + firstEvent.ctx.slice(-6) : firstEvent.ctx;
+                        ctxLabel = `ctx=${shortCtx}`;
+                    }
+                    
+                    let label = `${commLabel} | Rank ${firstEvent.rank}`;
+                    if (ctxLabel) {
+                        label += ` | ${ctxLabel}`;
+                    }
+                    if (tids.size === 1) {
+                        // All events have the same thread ID
+                        label += ` | tid=${Array.from(tids)[0]}`;
+                    } else if (tids.size > 1) {
+                        // Multiple thread IDs in this lane
+                        label += ` | tids: ${Array.from(tids).join(',')}`;
+                    }
+                    label += ` | ${laneEvents.length} events`;
+                    
+                    ctx.fillStyle = '#858585';
+                    ctx.font = '11px monospace';
+                    ctx.fillText(label, 10, y + laneHeight / 2 + 4);
+                }
+                
+                // Draw events in this lane and store bounds
+                laneEvents.forEach(([key, event]) => {
+                    // Store key on event for later reference
+                    event._key = key;
+                    
+                    // Restore highlighted event if this is the one
+                    if (highlightedEventKey === key) {
+                        highlightedEvent = event;
+                    }
+                    
+                    // Check if this event is hovered or highlighted
+                    const isHovered = hoveredEvent === event;
+                    const isHighlighted = highlightedEvent === event;
+                    // Check if this event has a highlighted state
+                    const stateHighlightIdx = (highlightedStateKey === key) ? highlightedStateIndex : null;
+                    const bounds = drawBar(event, laneIndex, y, isHovered, isHighlighted, stateHighlightIdx);
+                    
+                    // Store bounds for hover detection and arrow drawing
+                    event._bounds = bounds;
+                    // Store state bounds for hover detection
+                    // Note: stateBounds y coordinates are already in canvas coordinates
+                    // (calculated from lane y + laneHeight/2 in drawBar)
+                    if (bounds.stateBounds) {
+                        event._stateBounds = bounds.stateBounds;
+                    }
+                    
+                    // Add to rendered events map for arrow drawing
+                    renderedEventsMap.set(key, event);
+                });
+            });
+            
+            // Draw parent-child arrows after events are drawn (so arrows appear on top)
+            // This makes it easier to see the relationships
+            if (showParentArrows && eventsData.parent_child_map) {
+                drawParentChildArrows(lanes, eventToLane, renderedEventsMap);
+            }
+            
+            // Draw selection rectangle if selecting
+            if (isSelecting) {
+                const selStartX = Math.min(selectionStartX, selectionEndX);
+                const selEndX = Math.max(selectionStartX, selectionEndX);
+                const selWidth = selEndX - selStartX;
+                
+                // Draw semi-transparent selection rectangle
+                ctx.fillStyle = 'rgba(156, 220, 254, 0.2)'; // Semi-transparent light blue
+                ctx.fillRect(selStartX, 0, selWidth, canvas.height);
+                
+                // Draw selection border
+                ctx.strokeStyle = '#9cdcfe';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([5, 5]);
+                ctx.strokeRect(selStartX, 0, selWidth, canvas.height);
+                ctx.setLineDash([]);
+            }
+            
+            // Setup mouse interaction
+            let mouseDownX = 0;
+            let mouseDownY = 0;
+            
+            canvas.addEventListener('mousedown', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                mouseDownX = e.clientX - rect.left;
+                mouseDownY = e.clientY - rect.top;
+                
+                // Check if clicking on an event or state transition - if so, highlight it and don't start selection
+                let clickedOnEvent = false;
+                let clickedEvent = null;
+                let clickedState = null;
+                let clickedStateIndex = null;
+                
+                lanes.forEach((laneEvents) => {
+                    laneEvents.forEach(([key, event]) => {
+                        // Check for clicks on state transitions first (they're on top)
+                        if (event._stateBounds) {
+                            event._stateBounds.forEach(stateBound => {
+                                const stateX = stateBound.x;
+                                const stateY = stateBound.y;
+                                const stateWidth = stateBound.width;
+                                const stateHeight = stateBound.height;
+                                
+                                if (mouseDownX >= stateX && mouseDownX <= stateX + stateWidth &&
+                                    mouseDownY >= stateY && mouseDownY <= stateY + stateHeight) {
+                                    clickedOnEvent = true;
+                                    clickedEvent = event;
+                                    clickedState = stateBound.state;
+                                    clickedStateIndex = stateBound.stateIndex;
+                                }
+                            });
+                        }
+                        
+                        // Check for clicks on the main event bar (only if no state was clicked)
+                        if (!clickedOnEvent && event._bounds && 
+                            mouseDownX >= event._bounds.startX && mouseDownX <= event._bounds.endX &&
+                            mouseDownY >= event._bounds.y && mouseDownY <= event._bounds.y + event._bounds.height) {
+                            clickedOnEvent = true;
+                            clickedEvent = event;
+                        }
+                    });
+                });
+                
+                if (clickedOnEvent && clickedEvent) {
+                    if (clickedState !== null && clickedStateIndex !== null) {
+                        // Clicked on a state transition - highlight it
+                        highlightedStateKey = clickedEvent._key;
+                        highlightedStateIndex = clickedStateIndex;
+                        highlightedEventKey = null; // Clear event highlight
+                        highlightedEvent = null;
+                    } else {
+                        // Clicked on an event bar - highlight it
+                        highlightedEventKey = clickedEvent._key;
+                        highlightedStateKey = null; // Clear state highlight
+                        highlightedStateIndex = null;
+                    }
+                    renderTimeline(); // Re-render to show highlight
+                } else if (mouseDownY > 20) {
+                    // Clicked on canvas (not on event) - clear highlights and start selection
+                    highlightedEventKey = null;
+                    highlightedEvent = null;
+                    highlightedStateKey = null;
+                    highlightedStateIndex = null;
+                    isSelecting = true;
+                    selectionStartX = mouseDownX;
+                    selectionEndX = mouseDownX;
+                    renderTimeline(); // Re-render to clear highlight
+                }
+            });
+            
+            canvas.addEventListener('mousemove', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                
+                if (isSelecting) {
+                    // Update selection end position
+                    selectionEndX = mouseX;
+                    // Clamp to canvas bounds
+                    selectionEndX = Math.max(0, Math.min(canvas.width, selectionEndX));
+                    // Redraw to show updated selection
+                    renderTimeline();
+                    return;
+                }
+                
+                // Find hovered event or state
+                hoveredEvent = null;
+                let hoveredState = null;
+                
+                // Helper function to check if expanded hover area would overlap with other events on the same lane
+                function canExpandHoverArea(event, laneEvents, expandPx = HOVER_EXPAND) {
+                    if (!event._bounds) return false;
+                    
+                    const expandedStartX = event._bounds.startX - expandPx;
+                    const expandedEndX = event._bounds.endX + expandPx;
+                    
+                    // Check if expanded area would overlap with any other event on the same lane
+                    for (const [otherKey, otherEvent] of laneEvents) {
+                        if (otherEvent === event || !otherEvent._bounds) continue;
+                        
+                        // Check if expanded area overlaps with this other event
+                        if (!(expandedEndX < otherEvent._bounds.startX || expandedStartX > otherEvent._bounds.endX)) {
+                            return false; // Overlap detected, can't expand
+                        }
+                    }
+                    
+                    return true; // No overlap, can expand
+                }
+                
+                lanes.forEach((laneEvents, laneIndex) => {
+                    laneEvents.forEach(([key, event]) => {
+                        // Check if mouse is over the main event bar (with expanded hover area if safe)
+                        if (event._bounds) {
+                            const canExpand = canExpandHoverArea(event, laneEvents, HOVER_EXPAND);
+                            const hoverStartX = canExpand ? event._bounds.startX - HOVER_EXPAND : event._bounds.startX;
+                            const hoverEndX = canExpand ? event._bounds.endX + HOVER_EXPAND : event._bounds.endX;
+                            
+                            if (mouseX >= hoverStartX && mouseX <= hoverEndX &&
+                                mouseY >= event._bounds.y && mouseY <= event._bounds.y + event._bounds.height) {
+                                hoveredEvent = event;
+                            }
+                        }
+                        
+                        // Check if mouse is over any state marker (speech bubble or small circle)
+                        if (event._stateBounds) {
+                            event._stateBounds.forEach(stateBound => {
+                                // stateBound.y is already in canvas coordinates (relative to canvas top)
+                                // because drawBar receives y (lane top) and calculates centerY from it
+                                const stateX = stateBound.x;
+                                const stateY = stateBound.y;
+                                const stateWidth = stateBound.width;
+                                const stateHeight = stateBound.height;
+                                
+                                if (mouseX >= stateX && mouseX <= stateX + stateWidth &&
+                                    mouseY >= stateY && mouseY <= stateY + stateHeight) {
+                                    hoveredEvent = event;
+                                    hoveredState = stateBound.state;
+                                }
+                            });
+                        }
+                    });
+                });
+                
+                if (hoveredEvent) {
+                    canvas.style.cursor = 'pointer';
+                    updateInfo(hoveredEvent, hoveredState);
+                } else if (highlightedStateKey && highlightedStateIndex !== null) {
+                    // Show info for highlighted state
+                    const highlightedStateEvent = filteredEvents.find(([key, event]) => key === highlightedStateKey)?.[1];
+                    if (highlightedStateEvent && highlightedStateEvent.states && highlightedStateEvent.states[highlightedStateIndex]) {
+                        canvas.style.cursor = 'default';
+                        updateInfo(highlightedStateEvent, highlightedStateEvent.states[highlightedStateIndex]);
+                    }
+                } else if (highlightedEvent) {
+                    // Keep showing info for highlighted event even when not hovering
+                    canvas.style.cursor = 'default';
+                    updateInfo(highlightedEvent, null);
+                } else {
+                    canvas.style.cursor = isSelecting ? 'crosshair' : 'default';
+                    if (!isSelecting) {
+                        document.getElementById('info-text').textContent = 'Hover over events to see details';
+                    }
+                }
+            });
+            
+            canvas.addEventListener('mouseup', (e) => {
+                if (isSelecting) {
+                    const rect = canvas.getBoundingClientRect();
+                    const mouseX = e.clientX - rect.left;
+                    selectionEndX = Math.max(0, Math.min(canvas.width, mouseX));
+                    
+                    // Calculate time range from selection
+                    const selStartX = Math.min(selectionStartX, selectionEndX);
+                    const selEndX = Math.max(selectionStartX, selectionEndX);
+                    
+                    // Only apply if selection is meaningful (at least 10 pixels wide)
+                    if (selEndX - selStartX > 10) {
+                        const selectedMinTime = xToTime(selStartX);
+                        const selectedMaxTime = xToTime(selEndX);
+                        
+                        // xToTime returns normalized time if normalizeTime is true
+                        // So we can directly use it for the inputs
+                        document.getElementById('time-min').value = Math.round(selectedMinTime);
+                        document.getElementById('time-max').value = Math.round(selectedMaxTime);
+                        
+                        // Apply filters
+                        applyFilters();
+                    }
+                    
+                    // Reset selection
+                    isSelecting = false;
+                    selectionStartX = 0;
+                    selectionEndX = 0;
+                    renderTimeline();
+                }
+            });
+            
+            // Cancel selection if mouse leaves canvas
+            canvas.addEventListener('mouseleave', () => {
+                if (isSelecting) {
+                    isSelecting = false;
+                    selectionStartX = 0;
+                    selectionEndX = 0;
+                    renderTimeline();
+                }
+            });
+            
+            // Show highlighted state or event info if it exists and no event is being hovered
+            if (hoveredEvent) {
+                // Hovered event takes priority
+            } else if (highlightedStateKey && highlightedStateIndex !== null) {
+                // Show info for highlighted state
+                const highlightedStateEvent = filteredEvents.find(([key, event]) => key === highlightedStateKey)?.[1];
+                if (highlightedStateEvent && highlightedStateEvent.states && highlightedStateEvent.states[highlightedStateIndex]) {
+                    updateInfo(highlightedStateEvent, highlightedStateEvent.states[highlightedStateIndex]);
+                }
+            } else if (highlightedEvent) {
+                updateInfo(highlightedEvent, null);
+            } else {
+                document.getElementById('info-text').textContent = 'Hover over events to see details';
+            }
+            
+            // Prevent clicks on infobox from clearing highlight
+            const infoPanel = document.querySelector('.info-panel');
+            if (infoPanel) {
+                infoPanel.addEventListener('mousedown', (e) => {
+                    e.stopPropagation(); // Prevent event from bubbling to document
+                });
+                infoPanel.addEventListener('click', (e) => {
+                    e.stopPropagation(); // Prevent event from bubbling to document
+                });
+            }
+            
+            // Restore scroll position after rendering (use requestAnimationFrame to ensure DOM is updated)
+            requestAnimationFrame(() => {
+                container.scrollLeft = savedScrollLeft;
+                container.scrollTop = savedScrollTop;
+            });
+        }
+        
+        function updateInfo(event, hoveredState = null) {
+            const lines = [];
+            
+            // If hovering over a specific state, show that state's info prominently
+            if (hoveredState) {
+                lines.push('<strong style="color: #ff6b6b;">State Transition (Hovered)</strong>');
+                lines.push(`State Name: ${hoveredState.state_name || 'Unknown'}`);
+                lines.push(`State ID: ${hoveredState.state_id || 'N/A'}`);
+                if (hoveredState.tid !== undefined && hoveredState.tid !== null) {
+                    lines.push(`Thread ID: ${hoveredState.tid}`);
+                }
+                if (hoveredState.pid !== undefined && hoveredState.pid !== null) {
+                    lines.push(`Process ID: ${hoveredState.pid}`);
+                }
+                lines.push(`Timestamp: ${hoveredState.timestamp.toFixed(3)}μs`);
+                
+                if (hoveredState.details && Object.keys(hoveredState.details).length > 0) {
+                    lines.push('');
+                    lines.push('State Details:');
+                    for (const [key, value] of Object.entries(hoveredState.details)) {
+                        if (typeof value === 'object') {
+                            lines.push(`  ${key}: ${JSON.stringify(value)}`);
+                        } else {
+                            lines.push(`  ${key}: ${value}`);
+                        }
+                    }
+                }
+                
+                lines.push('');
+                lines.push('<strong>Parent Event:</strong>');
+            }
+            
+            // Event descriptor type (most important)
+            if (event.type_name) {
+                lines.push(`Event Type: ${event.type_name}`);
+            } else if (event.type) {
+                lines.push(`Event Type: ${event.type}`);
+            }
+            
+            // Function name
+            if (event.func) {
+                lines.push(`Function: ${event.func}`);
+            }
+            
+            // Sequence number (for Coll events)
+            if (event.seq_number !== undefined && event.seq_number !== null) {
+                lines.push(`Sequence Number: ${event.seq_number}`);
+            }
+            
+            // Basic info
+            lines.push(`Rank: ${event.rank !== undefined ? event.rank : 'N/A'}`);
+            if (event.commid) {
+                // Show commid with shortened display
+                const shortId = event.commid.length > 12 ? '...' + event.commid.slice(-12) : event.commid;
+                const commIdx = eventsData.commids ? eventsData.commids.indexOf(event.commid) + 1 : '?';
+                lines.push(`<strong style="color: #dcdcaa;">Communicator #${commIdx}</strong> (${shortId})`);
+            }
+            if (event.ctx) {
+                lines.push(`Context: ${event.ctx}`);
+            }
+            
+            // Thread IDs
+            if (event.start_tid !== undefined && event.start_tid !== null) {
+                if (event.stop_tid !== undefined && event.stop_tid !== null && event.start_tid !== event.stop_tid) {
+                    // Different threads for start and stop - highlight this!
+                    lines.push(`<strong style="color: #f48771;">Start Thread ID: ${event.start_tid}</strong>`);
+                    lines.push(`<strong style="color: #f48771;">Stop Thread ID: ${event.stop_tid}</strong> (different thread!)`);
+                } else {
+                    lines.push(`Thread ID: ${event.start_tid}`);
+                }
+            } else if (event.stop_tid !== undefined && event.stop_tid !== null) {
+                lines.push(`Thread ID (stop): ${event.stop_tid}`);
+            }
+            
+            // Process IDs
+            if (event.start_pid !== undefined && event.start_pid !== null) {
+                if (event.stop_pid !== undefined && event.stop_pid !== null && event.start_pid !== event.stop_pid) {
+                    // Different processes for start and stop - highlight this!
+                    lines.push(`<strong style="color: #f48771;">Start Process ID: ${event.start_pid}</strong>`);
+                    lines.push(`<strong style="color: #f48771;">Stop Process ID: ${event.stop_pid}</strong> (different process!)`);
+                } else {
+                    lines.push(`Process ID: ${event.start_pid}`);
+                }
+            } else if (event.stop_pid !== undefined && event.stop_pid !== null) {
+                lines.push(`Process ID (stop): ${event.stop_pid}`);
+            }
+            
+            if (event.event_addr) {
+                lines.push(`Event Address: ${event.event_addr}`);
+            }
+            
+            // Timestamps
+            if (event.start !== null) {
+                lines.push(`Start Time: ${event.start.toFixed(3)}μs`);
+            }
+            if (event.stop !== null) {
+                lines.push(`Stop Time: ${event.stop.toFixed(3)}μs`);
+            }
+            if (event.start !== null && event.stop !== null) {
+                const duration = event.stop - event.start;
+                lines.push(`Duration: ${duration.toFixed(3)}μs (${(duration / 1000).toFixed(3)}ms)`);
+            }
+            
+            // All event details (from log file)
+            if (event.details && Object.keys(event.details).length > 0) {
+                lines.push('');
+                lines.push('Event Details:');
+                for (const [key, value] of Object.entries(event.details)) {
+                    if (typeof value === 'object') {
+                        lines.push(`  ${key}: ${JSON.stringify(value)}`);
+                    } else {
+                        lines.push(`  ${key}: ${value}`);
+                    }
+                }
+            }
+            
+            // Parent-child relationship information
+            if (eventsData.event_to_parent && eventsData.event_to_parent[event._key]) {
+                const parentId = eventsData.event_to_parent[event._key];
+                const parentEvent = eventsData.events[parentId];
+                if (parentEvent) {
+                    lines.push('');
+                    lines.push('<strong style="color: #4ec9b0;">Parent Event:</strong>');
+                    lines.push(`  Type: ${parentEvent.type_name || parentEvent.type || 'Unknown'}`);
+                    if (parentEvent.func) {
+                        lines.push(`  Function: ${parentEvent.func}`);
+                    }
+                    lines.push(`  Rank: ${parentEvent.rank}`);
+                }
+            }
+            
+            if (eventsData.parent_child_map && eventsData.parent_child_map[event._key]) {
+                const children = eventsData.parent_child_map[event._key];
+                lines.push('');
+                lines.push(`<strong style="color: #4ec9b0;">Child Events (${children.length}):</strong>`);
+                children.forEach((childId, idx) => {
+                    const childEvent = eventsData.events[childId];
+                    if (childEvent) {
+                        lines.push(`  ${idx + 1}. ${childEvent.type_name || childEvent.type || 'Unknown'}`);
+                        if (childEvent.func) {
+                            lines.push(`     Function: ${childEvent.func}`);
+                        }
+                    }
+                });
+            }
+            
+            // State information (all states, with highlight if one is hovered)
+            if (event.states && event.states.length > 0) {
+                lines.push('');
+                lines.push(`State Transitions (${event.states.length}):`);
+                event.states.forEach((state, idx) => {
+                    const isHovered = hoveredState && state.timestamp === hoveredState.timestamp && 
+                                     state.state_name === hoveredState.state_name;
+                    const prefix = isHovered ? '<strong style="color: #ff6b6b;">→' : '  [';
+                    const suffix = isHovered ? '</strong>' : ']';
+                    const tidInfo = state.tid !== undefined && state.tid !== null ? ` tid=${state.tid}` : '';
+                    const pidInfo = state.pid !== undefined && state.pid !== null ? ` pid=${state.pid}` : '';
+                    lines.push(`${prefix}${idx + 1}${suffix} ${state.state_name || 'Unknown'} (ID: ${state.state_id || 'N/A'}${tidInfo}${pidInfo}) at ${state.timestamp.toFixed(3)}μs`);
+                    if (state.details && Object.keys(state.details).length > 0) {
+                        for (const [key, value] of Object.entries(state.details)) {
+                            lines.push(`      ${key}: ${value}`);
+                        }
+                    }
+                });
+            }
+            
+            // Display in info panel (with line breaks for readability)
+            const infoText = document.getElementById('info-text');
+            infoText.innerHTML = lines.join('<br>');
+            infoText.style.textAlign = 'left';
+            infoText.style.padding = '10px';
+        }
+        
+        // Initialize
+        loadEvents();
+    </script>
+</body>
+</html>
+
