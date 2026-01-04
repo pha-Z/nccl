@@ -973,10 +973,10 @@ ncclResult_t myStartEvent(void* context, void** eHandle,
   // ========================================================================
   // PXN (PCI x NVLink) CONTEXT VALIDATION
   // ========================================================================
-  // When PXN routing is enabled, NCCL may execute events on a different process
-  // than the one that originated them. In this case, the 'context' parameter
-  // points to memory in the originating process's address space, which is
-  // INVALID in our address space.
+  // When PXN routing is enabled, NCCL may process events on a different proxy
+  // thread than the one that originated them. In this case, 'context' points
+  // to memory in the originating process's address space, which is INVALID in
+  // our address space.
   //
   // We detect this in two ways:
   // 1. For ProxyOp events: check eDescr->proxyOp.pid against our myPid
@@ -1006,7 +1006,7 @@ ncclResult_t myStartEvent(void* context, void** eHandle,
     event = allocateFromDetachPool(detachLogFile);
     if (!event) {
       *eHandle = nullptr;
-      return ncclSuccess;  // Pool exhausted - drop this event gracefully
+      return ncclSuccess;  // Pool allocation failed - drop this event gracefully
     }
     
     // Set up basic event fields for detached event
@@ -1155,7 +1155,7 @@ ncclResult_t myStopEvent(void* eHandle) {
     // Log to process-wide PXN log file
     if (detachLogFile) {
       pthread_mutex_lock(&detachLogMutex);
-      fprintf(detachLogFile, "[%.3f] STOP %s::%s (pid=%d, tid=%d, PXN from pid=%d, duration=%.3f us, parentObj=%p, event=%p)\n",
+      fprintf(detachLogFile, "[%.3f] STOP %s::%s (pid=%d, tid=%d, PXN event origin pid=%d, duration=%.3f us, parentObj=%p, event=%p)\n",
               endTime - detachStartTime,
               event->typeName ? event->typeName : "ncclProfileUnknown",
               event->func ? event->func : "Unknown",
