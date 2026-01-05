@@ -351,6 +351,10 @@
                 <label for="show-parent-arrows">Show Parent-Child Arrows</label>
             </div>
             <div class="control-group checkbox-option">
+                <input type="checkbox" id="show-collective-lines" checked>
+                <label for="show-collective-lines">Show Collective Connections</label>
+            </div>
+            <div class="control-group checkbox-option">
                 <input type="checkbox" id="group-by-type" checked>
                 <label for="group-by-type">Allow Multiple Events per Lane (same type)</label>
             </div>
@@ -427,6 +431,16 @@
                         <strong>Speech Bubble:</strong> State transition that cannot be shown as a small marker on an event bar (because the event has incomplete bounds or the state is outside the event's time range).
                     </div>
                 </div>
+                <div class="element-item">
+                    <div class="element-visual">
+                        <svg width="30" height="20" style="display: block;">
+                            <line x1="5" y1="5" x2="25" y2="15" stroke="#ff6b6b" stroke-width="2"/>
+                        </svg>
+                    </div>
+                    <div class="element-desc">
+                        <strong>Red Connection Line:</strong> Connects collective events (CollApi, Coll) that belong together across ranks (based on seqNum and commId).
+                    </div>
+                </div>
             </div>
             <div style="margin-top: 20px; padding: 15px; background: #1e1e1e; border-radius: 5px; border: 1px solid #333;">
                 <h4 style="color: #4ec9b0; margin-bottom: 10px;">About ProfilerLifecycle Events</h4>
@@ -485,6 +499,7 @@
         let highlightedStateKey = null; // Track clicked/highlighted state's event key
         let highlightedStateIndex = null; // Track clicked/highlighted state's index within event
         let showParentArrows = true;
+        let showCollectiveLines = true;
         let groupByType = true; // Default to new mode (group by rank+type)
         let normalizeTime = true; // Default to normalized timeline (start at 0)
         let isSelecting = false;
@@ -658,16 +673,20 @@
             }
             
             // Populate GPU device filter
+            // Use device_ids from parser if available, otherwise extract from events
             const deviceFilter = document.getElementById('device-filter');
-            const deviceSet = new Set();
-            Object.values(eventsData.events || {}).forEach(event => {
-                if (event.device_id !== undefined && event.device_id !== null) {
-                    deviceSet.add(event.device_id);
-                }
-            });
-            const devices = Array.from(deviceSet).sort((a, b) => a - b);
-            if (devices.length > 0) {
-                devices.forEach(deviceId => {
+            let device_ids = eventsData.device_ids || [];
+            if (device_ids.length === 0) {
+                const deviceSet = new Set();
+                Object.values(eventsData.events || {}).forEach(event => {
+                    if (event.device_id !== undefined && event.device_id !== null) {
+                        deviceSet.add(event.device_id);
+                    }
+                });
+                device_ids = Array.from(deviceSet).sort((a, b) => a - b);
+            }
+            if (device_ids.length > 0) {
+                device_ids.forEach(deviceId => {
                     const option = document.createElement('option');
                     option.value = deviceId;
                     option.textContent = `GPU ${deviceId}`;
@@ -794,6 +813,10 @@
                 showParentArrows = e.target.checked;
                 renderTimeline();
             });
+            document.getElementById('show-collective-lines').addEventListener('change', (e) => {
+                showCollectiveLines = e.target.checked;
+                renderTimeline();
+            });
             document.getElementById('group-by-type').addEventListener('change', (e) => {
                 groupByType = e.target.checked;
                 renderTimeline();
@@ -891,13 +914,8 @@
                 // Communicator filter
                 if (commidFilter !== 'all' && event.commid !== commidFilter) return false;
                 
-                // GPU device filter
-                if (deviceFilter !== 'all') {
-                    const deviceId = parseInt(deviceFilter);
-                    if (event.device_id === undefined || event.device_id === null || event.device_id !== deviceId) {
-                        return false;
-                    }
-                }
+                // GPU device filter (matches rank filter pattern)
+                if (deviceFilter !== 'all' && event.device_id !== parseInt(deviceFilter)) return false;
                 
                 if (selectedTypes.size > 0 && !selectedTypes.has(event.type)) return false;
                 
@@ -1261,6 +1279,65 @@
             
             ctx.setLineDash([]); // Reset line dash
             ctx.globalAlpha = 1.0; // Reset opacity
+        }
+        
+        function drawCollectiveConnections(renderedEventsMap, eventToLane) {
+            const collectives = new Map();
+            
+            // Group rendered events by collective identifier
+            for (const [key, event] of renderedEventsMap.entries()) {
+                // Only consider events that have a sequence number and belong to a communicator
+                // Usually these are CollApi, Coll, etc.
+                if (event.seq_number !== undefined && event.seq_number !== null && event.commid) {
+                    // Group by commid, seq_number, function name (e.g. AllReduce), and event type
+                    // This ensures we connect the same collective operation across ranks
+                    const groupKey = `${event.commid}_${event.seq_number}_${event.func}_${event.type}`;
+                    if (!collectives.has(groupKey)) {
+                        collectives.set(groupKey, []);
+                    }
+                    collectives.get(groupKey).push({key, event});
+                }
+            }
+            
+            ctx.save();
+            ctx.globalAlpha = 0.6;
+            ctx.strokeStyle = '#ff6b6b'; // Light red for connections
+            ctx.lineWidth = 1.5;
+            // No dash for collective connections to distinguish from parent-child arrows
+            
+            for (const [groupKey, groupEvents] of collectives.entries()) {
+                if (groupEvents.length < 2) continue;
+                
+                // Sort by lane index to draw top-to-bottom lines across ranks
+                groupEvents.sort((a, b) => {
+                    const laneA = eventToLane.get(a.key);
+                    const laneB = eventToLane.get(b.key);
+                    return laneA - laneB;
+                });
+                
+                ctx.beginPath();
+                for (let i = 0; i < groupEvents.length; i++) {
+                    const {key, event} = groupEvents[i];
+                    const lane = eventToLane.get(key);
+                    if (lane === undefined) continue;
+                    
+                    const y = 40 + lane * laneHeight + laneHeight / 2;
+                    
+                    // Use center of the event bar for connection points
+                    const x = event._bounds.startX !== undefined && event._bounds.endX !== undefined
+                        ? (event._bounds.startX + event._bounds.endX) / 2
+                        : (event._bounds.startX || event._bounds.endX || 0);
+                        
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        // Draw line to this event
+                        ctx.lineTo(x, y);
+                    }
+                }
+                ctx.stroke();
+            }
+            ctx.restore();
         }
         
         /**
@@ -1645,6 +1722,11 @@
             // This makes it easier to see the relationships
             if (showParentArrows && eventsData.parent_child_map) {
                 drawParentChildArrows(lanes, eventToLane, renderedEventsMap);
+            }
+            
+            // Draw collective connections (connecting same seqNum across ranks)
+            if (showCollectiveLines) {
+                drawCollectiveConnections(renderedEventsMap, eventToLane);
             }
             
             // Draw selection rectangle if selecting
