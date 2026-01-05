@@ -59,7 +59,6 @@ static const size_t BLACKLIST_CAP = 10000000;           // 10 million entries ma
 
 // Environment variable names
 static const char* ENV_EVENT_MASK = "NCCL_PROFILE_EVENT_MASK";
-static const char* ENV_DETACH_POOL_SIZE = "NCCL_PROFILE_DETACH_POOL_SIZE";
 
 // ============================================================================
 // SECTION 2: Utility Functions
@@ -197,70 +196,12 @@ static const char* getStateName(ncclProfilerEventState_v5_t eState) {
 // Logging Macros
 // ----------------------------------------------------------------------------
 
-// Helper function to log START events (handles both normal and detached PXN events)
-static void logStartEvent(MyEvent* event, void* parentObj, const char* fmt, ...) {
-  if (!event) return;
-  
-  pid_t pid = getpid();
-  pid_t tid = getTid();
-  
-  // Check if this is a detached PXN event
-  if (event->fromDetachPool) {
-    // Use process-wide detach log file
-    if (!detachLogFile) return;
-    
-    pthread_mutex_lock(&detachLogMutex);
-    if (*fmt != '\0') {
-      va_list args;
-      va_start(args, fmt);
-      fprintf(detachLogFile, "[%.3f] START %s (pid=%d, tid=%d, PXN from pid=%d, ", 
-              event->startTime - detachStartTime, event->typeName, 
-              static_cast<int>(pid), tid, static_cast<int>(event->originPid));
-      vfprintf(detachLogFile, fmt, args);
-      va_end(args);
-      fprintf(detachLogFile, ", parentObj=%p, event=%p)\n",
-              parentObj, static_cast<void*>(event));
-    } else {
-      fprintf(detachLogFile, "[%.3f] START %s (pid=%d, tid=%d, PXN from pid=%d, parentObj=%p, event=%p)\n",
-              event->startTime - detachStartTime, event->typeName, 
-              static_cast<int>(pid), tid, static_cast<int>(event->originPid),
-              parentObj, static_cast<void*>(event));
-    }
-    fflush(detachLogFile);
-    pthread_mutex_unlock(&detachLogMutex);
-  } else {
-    // Normal event - use context's log file
-    MyContext* ctx = event->ctx;
-    if (!ctx || !ctx->logFile) return;
-    
-    pthread_mutex_lock(&ctx->logMutex);
-    if (*fmt != '\0') {
-      va_list args;
-      va_start(args, fmt);
-      fprintf(ctx->logFile, "[%.3f] START %s (pid=%d, tid=%d, device=%d, ", 
-              event->startTime, event->typeName, static_cast<int>(pid), tid, ctx->cudaDev);
-      vfprintf(ctx->logFile, fmt, args);
-      va_end(args);
-      fprintf(ctx->logFile, ", parentObj=%p, event=%p, ctx=%p)\n",
-              parentObj, static_cast<void*>(event), static_cast<void*>(ctx));
-    } else {
-      fprintf(ctx->logFile, "[%.3f] START %s (pid=%d, tid=%d, device=%d, parentObj=%p, event=%p, ctx=%p)\n",
-              event->startTime, event->typeName, static_cast<int>(pid), tid, ctx->cudaDev,
-              parentObj, static_cast<void*>(event), static_cast<void*>(ctx));
-    }
-    fflush(ctx->logFile);
-    pthread_mutex_unlock(&ctx->logMutex);
-  }
-}
-
-// Convenience macro for backward compatibility (now calls helper function)
-#define LOG_START(ctx, event, parentObj, fmt, ...) logStartEvent(event, parentObj, fmt, ##__VA_ARGS__)
-
 // ============================================================================
 // SECTION 3: Data Structures
 // ============================================================================
 
 // Forward declarations
+struct MyEvent;
 struct MyContext;
 struct EventPool;
 struct Blacklist;
@@ -681,6 +622,7 @@ struct MyContext {
 static pthread_mutex_t processInitMutex = PTHREAD_MUTEX_INITIALIZER;
 static int processInitCount = 0;             // Number of initialized communicators in this process
 static pid_t myPid = 0;                      // This process's PID (profiler plugin's process)
+static uint64_t myCommId = 0;                // commId for this profiler instance
 static EventPool* detachPool = nullptr;      // Pool for detached PXN ProxyOp events
 static Blacklist* detachBlacklist = nullptr; // Blacklist for detach pool
 static pthread_mutex_t detachMutex = PTHREAD_MUTEX_INITIALIZER;  // Protects detach pool and blacklist
@@ -719,9 +661,69 @@ static void unregisterContext(MyContext* ctx) {
   pthread_mutex_unlock(&contextRegistryMutex);
 }
 
-// Initialize the detach pool and log file (called on first communicator init)
-// dirname: the dump directory path for creating the PXN log file
-static bool initDetachPool(const char* dirname) {
+// ----------------------------------------------------------------------------
+// Logging Helper Functions
+// ----------------------------------------------------------------------------
+
+// Helper function to log START events (handles both normal and detached PXN events)
+static void logStartEvent(MyEvent* event, void* parentObj, const char* fmt, ...) {
+  if (!event) return;
+  
+  pid_t pid = getpid();
+  pid_t tid = getTid();
+  
+  // Check if this is a detached PXN event
+  if (event->fromDetachPool) {
+    // Use process-wide detach log file
+    if (!detachLogFile) return;
+    
+    pthread_mutex_lock(&detachLogMutex);
+    if (*fmt != '\0') {
+      va_list args;
+      va_start(args, fmt);
+      fprintf(detachLogFile, "[%.3f] START %s (pid=%d, tid=%d, PXN from pid=%d, ", 
+              event->startTime - detachStartTime, event->typeName, 
+              static_cast<int>(pid), tid, static_cast<int>(event->originPid));
+      vfprintf(detachLogFile, fmt, args);
+      va_end(args);
+      fprintf(detachLogFile, ", parentObj=%p, event=%p)\n",
+              parentObj, static_cast<void*>(event));
+    } else {
+      fprintf(detachLogFile, "[%.3f] START %s (pid=%d, tid=%d, PXN from pid=%d, parentObj=%p, event=%p)\n",
+              event->startTime - detachStartTime, event->typeName, 
+              static_cast<int>(pid), tid, static_cast<int>(event->originPid),
+              parentObj, static_cast<void*>(event));
+    }
+    fflush(detachLogFile);
+    pthread_mutex_unlock(&detachLogMutex);
+  } else {
+    // Normal event - use context's log file
+    MyContext* ctx = event->ctx;
+    if (!ctx || !ctx->logFile) return;
+    
+    pthread_mutex_lock(&ctx->logMutex);
+    if (*fmt != '\0') {
+      va_list args;
+      va_start(args, fmt);
+      fprintf(ctx->logFile, "[%.3f] START %s (pid=%d, tid=%d, device=%d, ", 
+              event->startTime, event->typeName, static_cast<int>(pid), tid, ctx->cudaDev);
+      vfprintf(ctx->logFile, fmt, args);
+      va_end(args);
+      fprintf(ctx->logFile, ", parentObj=%p, event=%p, ctx=%p)\n",
+              parentObj, static_cast<void*>(event), static_cast<void*>(ctx));
+    } else {
+      fprintf(ctx->logFile, "[%.3f] START %s (pid=%d, tid=%d, device=%d, parentObj=%p, event=%p, ctx=%p)\n",
+              event->startTime, event->typeName, static_cast<int>(pid), tid, ctx->cudaDev,
+              parentObj, static_cast<void*>(event), static_cast<void*>(ctx));
+    }
+    fflush(ctx->logFile);
+    pthread_mutex_unlock(&ctx->logMutex);
+  }
+}
+
+
+// Initialize the detach pool (called on first communicator init)
+static bool initDetachPool() {
   detachPool = new (std::nothrow) EventPool();
   detachBlacklist = new (std::nothrow) Blacklist();
   
@@ -733,11 +735,7 @@ static bool initDetachPool(const char* dirname) {
     return false;
   }
   
-  // Check for custom pool size from environment
-  const char* poolStr = getenv(ENV_DETACH_POOL_SIZE);
-  size_t initialSize = poolStr ? static_cast<size_t>(atoi(poolStr)) : INITIAL_DETACH_POOL_SIZE;
-  
-  if (!detachPool->init(initialSize)) {
+  if (!detachPool->init(INITIAL_DETACH_POOL_SIZE)) {
     delete detachPool;
     delete detachBlacklist;
     detachPool = nullptr;
@@ -745,23 +743,29 @@ static bool initDetachPool(const char* dirname) {
     return false;
   }
   
-  // Create process-wide log file for PXN events
+  return true;
+}
+
+// Initialize the PXN log file (called on first communicator init)
+static bool initPxnLogFile(const char* dirname, uint64_t commId) {
+  // Create process-wide log file for PXN events with commId in filename
   char pxnLogPath[512];
-  snprintf(pxnLogPath, sizeof(pxnLogPath), "%s/minimal_profiler_pxn_events_pid%d.log", 
-           dirname, static_cast<int>(myPid));
+  snprintf(pxnLogPath, sizeof(pxnLogPath), "%s/minimal_profiler_pxn_events_pid%d_comm%lu.log", 
+           dirname, static_cast<int>(myPid), commId);
   detachLogFile = fopen(pxnLogPath, "w");
   if (detachLogFile) {
     detachStartTime = getTime();
-    fprintf(detachLogFile, "=== PXN Events Log (Process PID: %d) ===\n", static_cast<int>(myPid));
+    fprintf(detachLogFile, "=== PXN Events Log (Process PID: %d, CommId: %lu) ===\n", 
+            static_cast<int>(myPid), commId);
+    fprintf(detachLogFile, "CommId: %lu\n", commId);
     fprintf(detachLogFile, "Start time: %.0f us\n", detachStartTime);
-    fprintf(detachLogFile, "Detach pool size: %zu\n", initialSize);
     fprintf(detachLogFile, "This file contains ProxyOp events from other processes (PXN routing)\n");
     fprintf(detachLogFile, "================================================\n\n");
     fflush(detachLogFile);
   }
   // Note: We continue even if log file creation fails - events just won't be logged
   
-  return true;
+  return detachLogFile != nullptr;
 }
 
 // Allocate an event from the detach pool
@@ -873,14 +877,18 @@ ncclResult_t myInit(void** context, uint64_t commId, int* eActivationMask,
   pthread_mutex_lock(&processInitMutex);
   if (processInitCount == 0) {
     myPid = getpid();
+    myCommId = commId;  // Store commId for this profiler instance
     
-    if (initDetachPool(dirname)) {
-      const char* poolStr = getenv(ENV_DETACH_POOL_SIZE);
-      size_t initialSize = poolStr ? static_cast<size_t>(atoi(poolStr)) : INITIAL_DETACH_POOL_SIZE;
-      fprintf(stderr, "[MinimalProfiler] Init: myPid=%d, detachPoolSize=%zu\n",
-              static_cast<int>(myPid), initialSize);
+    if (initDetachPool()) {
+      fprintf(stderr, "[MinimalProfiler] Init: myPid=%d, myCommId=%lu\n",
+              static_cast<int>(myPid), myCommId);
     } else {
       fprintf(stderr, "[MinimalProfiler] WARNING: Failed to initialize detach pool\n");
+    }
+    if (initPxnLogFile(dirname, commId)) {
+      fprintf(stderr, "[MinimalProfiler] PXN log file initialized\n");
+    } else {
+      fprintf(stderr, "[MinimalProfiler] WARNING: Failed to initialize PXN log file\n");
     }
   }
   processInitCount++;
@@ -1055,80 +1063,80 @@ ncclResult_t myStartEvent(void* context, void** eHandle,
   switch (eDescr->type) {
     case ncclProfileGroupApi:
       event->func = "GroupAPI";
-      LOG_START(ctx, event, eDescr->parentObj, "depth=%d, graphCaptured=%d",
-                eDescr->groupApi.groupDepth, eDescr->groupApi.graphCaptured ? 1 : 0);
+      logStartEvent(event, eDescr->parentObj, "depth=%d, graphCaptured=%d",
+                    eDescr->groupApi.groupDepth, eDescr->groupApi.graphCaptured ? 1 : 0);
       break;
       
     case ncclProfileCollApi:
       event->func = eDescr->collApi.func;
-      LOG_START(ctx, event, eDescr->parentObj, "func=%s, count=%zu, dtype=%s, root=%d, stream=%p, graphCaptured=%d",
-                eDescr->collApi.func, eDescr->collApi.count, eDescr->collApi.datatype,
-                eDescr->collApi.root, eDescr->collApi.stream, eDescr->collApi.graphCaptured ? 1 : 0);
+      logStartEvent(event, eDescr->parentObj, "func=%s, count=%zu, dtype=%s, root=%d, stream=%p, graphCaptured=%d",
+                    eDescr->collApi.func, eDescr->collApi.count, eDescr->collApi.datatype,
+                    eDescr->collApi.root, eDescr->collApi.stream, eDescr->collApi.graphCaptured ? 1 : 0);
       break;
       
     case ncclProfileP2pApi:
       event->func = eDescr->p2pApi.func;
-      LOG_START(ctx, event, eDescr->parentObj, "func=%s, count=%zu, dtype=%s, stream=%p, graphCaptured=%d",
-                eDescr->p2pApi.func, eDescr->p2pApi.count, eDescr->p2pApi.datatype,
-                eDescr->p2pApi.stream, eDescr->p2pApi.graphCaptured ? 1 : 0);
+      logStartEvent(event, eDescr->parentObj, "func=%s, count=%zu, dtype=%s, stream=%p, graphCaptured=%d",
+                    eDescr->p2pApi.func, eDescr->p2pApi.count, eDescr->p2pApi.datatype,
+                    eDescr->p2pApi.stream, eDescr->p2pApi.graphCaptured ? 1 : 0);
       break;
       
     case ncclProfileKernelLaunch:
       event->func = "KernelLaunch";
-      LOG_START(ctx, event, eDescr->parentObj, "stream=%p", eDescr->kernelLaunch.stream);
+      logStartEvent(event, eDescr->parentObj, "stream=%p", eDescr->kernelLaunch.stream);
       break;
     
     case ncclProfileColl:
       event->func = eDescr->coll.func;
-      LOG_START(ctx, event, eDescr->parentObj, "func=%s, seq=%lu, algo=%s, proto=%s, channels=%d, warps=%d, count=%zu, root=%d, dtype=%s, sendBuff=%p, recvBuff=%p, parentGroup=%p",
-                eDescr->coll.func, eDescr->coll.seqNumber, eDescr->coll.algo, eDescr->coll.proto,
-                eDescr->coll.nChannels, eDescr->coll.nWarps, eDescr->coll.count, eDescr->coll.root,
-                eDescr->coll.datatype, eDescr->coll.sendBuff, eDescr->coll.recvBuff, eDescr->coll.parentGroup);
+      logStartEvent(event, eDescr->parentObj, "func=%s, seq=%lu, algo=%s, proto=%s, channels=%d, warps=%d, count=%zu, root=%d, dtype=%s, sendBuff=%p, recvBuff=%p, parentGroup=%p",
+                    eDescr->coll.func, eDescr->coll.seqNumber, eDescr->coll.algo, eDescr->coll.proto,
+                    eDescr->coll.nChannels, eDescr->coll.nWarps, eDescr->coll.count, eDescr->coll.root,
+                    eDescr->coll.datatype, eDescr->coll.sendBuff, eDescr->coll.recvBuff, eDescr->coll.parentGroup);
       break;
       
     case ncclProfileP2p:
       event->func = eDescr->p2p.func;
-      LOG_START(ctx, event, eDescr->parentObj, "func=%s, peer=%d, channels=%d, count=%zu, dtype=%s, buff=%p, parentGroup=%p",
-                eDescr->p2p.func, eDescr->p2p.peer, eDescr->p2p.nChannels, eDescr->p2p.count,
-                eDescr->p2p.datatype, eDescr->p2p.buff, eDescr->p2p.parentGroup);
+      logStartEvent(event, eDescr->parentObj, "func=%s, peer=%d, channels=%d, count=%zu, dtype=%s, buff=%p, parentGroup=%p",
+                    eDescr->p2p.func, eDescr->p2p.peer, eDescr->p2p.nChannels, eDescr->p2p.count,
+                    eDescr->p2p.datatype, eDescr->p2p.buff, eDescr->p2p.parentGroup);
       break;
       
     case ncclProfileProxyOp:
       event->func = "ProxyOp";
-      LOG_START(ctx, event, eDescr->parentObj, "channel=%d, peer=%d, steps=%d, chunkSize=%d, isSend=%d, eventPid=%d",
-                eDescr->proxyOp.channelId, eDescr->proxyOp.peer, eDescr->proxyOp.nSteps,
-                eDescr->proxyOp.chunkSize, eDescr->proxyOp.isSend, static_cast<int>(eDescr->proxyOp.pid));
+      logStartEvent(event, eDescr->parentObj, "channel=%d, peer=%d, steps=%d, chunkSize=%d, isSend=%d, eventPid=%d",
+                    eDescr->proxyOp.channelId, eDescr->proxyOp.peer, eDescr->proxyOp.nSteps,
+                    eDescr->proxyOp.chunkSize, eDescr->proxyOp.isSend, static_cast<int>(eDescr->proxyOp.pid));
       break;
       
     case ncclProfileProxyStep:
       event->func = "ProxyStep";
-      LOG_START(ctx, event, eDescr->parentObj, "step=%d", eDescr->proxyStep.step);
+      logStartEvent(event, eDescr->parentObj, "step=%d", eDescr->proxyStep.step);
       break;
       
     case ncclProfileProxyCtrl:
       event->func = "ProxyCtrl";
-      LOG_START(ctx, event, eDescr->parentObj, "");
+      logStartEvent(event, eDescr->parentObj, "");
       break;
       
     case ncclProfileKernelCh:
       event->func = "KernelCh";
-      LOG_START(ctx, event, eDescr->parentObj, "channel=%d, pTimer=%lu", eDescr->kernelCh.channelId, eDescr->kernelCh.pTimer);
+      logStartEvent(event, eDescr->parentObj, "channel=%d, pTimer=%lu", eDescr->kernelCh.channelId, eDescr->kernelCh.pTimer);
       break;
       
     case ncclProfileNetPlugin:
       event->func = "NetPlugin";
-      LOG_START(ctx, event, eDescr->parentObj, "id=%ld, data=%p", static_cast<long>(eDescr->netPlugin.id), eDescr->netPlugin.data);
+      logStartEvent(event, eDescr->parentObj, "id=%ld, data=%p", static_cast<long>(eDescr->netPlugin.id), eDescr->netPlugin.data);
       break;
       
     case ncclProfileGroup:
       event->func = "Group";
-      LOG_START(ctx, event, eDescr->parentObj, "");
+      logStartEvent(event, eDescr->parentObj, "");
       break;
       
     default:
       event->func = "Unknown";
       event->typeName = "ncclProfileUnknown";
-      LOG_START(ctx, event, eDescr->parentObj, "type=0x%lx", static_cast<unsigned long>(eDescr->type));
+      logStartEvent(event, eDescr->parentObj, "type=0x%lx", static_cast<unsigned long>(eDescr->type));
       break;
   }
   
