@@ -12,9 +12,9 @@
  * 
  * Code Organization:
  * 1. Configuration constants
- * 2. Utility functions (time, logging, type mappers)
- * 3. Data structures (BlacklistNode, Blacklist, MyEvent, EventPool, MyContext)
- * 4. PXN Detach Pool module (for cross-process events)
+ * 2. Data structures
+ * 3. PXN Detach Pool module
+ * 4. Utility functions
  * 5. Profiler API implementation
  * 6. Export struct
  ************************************************************************/
@@ -61,143 +61,7 @@ static const size_t BLACKLIST_CAP = 10000000;           // 10 million entries ma
 static const char* ENV_EVENT_MASK = "NCCL_PROFILE_EVENT_MASK";
 
 // ============================================================================
-// SECTION 2: Utility Functions
-// ============================================================================
-
-// ----------------------------------------------------------------------------
-// Time and Thread Helpers
-// ----------------------------------------------------------------------------
-
-// Get current timestamp in microseconds
-static double getTime() {
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  return ts.tv_sec * 1e6 + ts.tv_nsec * 1e-3;
-}
-
-// Get thread ID (Linux-specific)
-static inline pid_t getTid() {
-  return static_cast<pid_t>(syscall(SYS_gettid));
-}
-
-// ----------------------------------------------------------------------------
-// Directory and File Helpers
-// ----------------------------------------------------------------------------
-
-// Get dump directory name (SLURM job ID or timestamp)
-static const char* getDumpDir(char* dirname, size_t dirname_size) {
-  const char* slurm_job_id = getenv("SLURM_JOB_ID");
-  if (slurm_job_id && slurm_job_id[0] != '\0') {
-    snprintf(dirname, dirname_size, "minimal_profiler_dump-%s", slurm_job_id);
-    return dirname;
-  }
-  
-  struct timespec ts;
-  if (clock_gettime(CLOCK_REALTIME, &ts) != 0) {
-    return nullptr;
-  }
-  
-  struct tm* tm_info = localtime(&ts.tv_sec);
-  if (!tm_info) {
-    return nullptr;
-  }
-  
-  snprintf(dirname, dirname_size, "minimal_profiler_dump-%04d%02d%02d-%02d%02d%02d",
-           tm_info->tm_year + 1900,
-           tm_info->tm_mon + 1,
-           tm_info->tm_mday,
-           tm_info->tm_hour,
-           tm_info->tm_min,
-           tm_info->tm_sec);
-  
-  return dirname;
-}
-
-// Create dump directory if it doesn't exist
-static int ensureDumpDir(const char* dirname) {
-  struct stat st = {0};
-  
-  if (stat(dirname, &st) == 0) {
-    if (S_ISDIR(st.st_mode)) {
-      return 0;
-    } else {
-      return -1;
-    }
-  }
-  
-  if (mkdir(dirname, 0755) != 0) {
-    if (errno == EEXIST) {
-      if (stat(dirname, &st) == 0 && S_ISDIR(st.st_mode)) {
-        return 0;
-      }
-    }
-    return -1;
-  }
-  
-  return 0;
-}
-
-// ----------------------------------------------------------------------------
-// Type and State Name Mappers
-// ----------------------------------------------------------------------------
-
-// Get human-readable event type name
-static const char* getEventTypeName(uint64_t type) {
-  switch (type) {
-    case ncclProfileGroupApi:     return "ncclProfileGroupApi";
-    case ncclProfileCollApi:      return "ncclProfileCollApi";
-    case ncclProfileP2pApi:       return "ncclProfileP2pApi";
-    case ncclProfileKernelLaunch: return "ncclProfileKernelLaunch";
-    case ncclProfileColl:         return "ncclProfileColl";
-    case ncclProfileP2p:          return "ncclProfileP2p";
-    case ncclProfileProxyOp:      return "ncclProfileProxyOp";
-    case ncclProfileProxyStep:    return "ncclProfileProxyStep";
-    case ncclProfileProxyCtrl:    return "ncclProfileProxyCtrl";
-    case ncclProfileKernelCh:     return "ncclProfileKernelCh";
-    case ncclProfileNetPlugin:    return "ncclProfileNetPlugin";
-    case ncclProfileGroup:        return "ncclProfileGroup";
-    default:                      return "ncclProfileUnknown";
-  }
-}
-
-// Get human-readable state name
-static const char* getStateName(ncclProfilerEventState_v5_t eState) {
-  switch (eState) {
-    case ncclProfilerProxyOpSendPosted:        return "ProxyOpSendPosted (deprecated)";
-    case ncclProfilerProxyOpSendRemFifoWait:   return "ProxyOpSendRemFifoWait (deprecated)";
-    case ncclProfilerProxyOpSendTransmitted:   return "ProxyOpSendTransmitted (deprecated)";
-    case ncclProfilerProxyOpSendDone:          return "ProxyOpSendDone (deprecated)";
-    case ncclProfilerProxyOpRecvPosted:        return "ProxyOpRecvPosted (deprecated)";
-    case ncclProfilerProxyOpRecvReceived:      return "ProxyOpRecvReceived (deprecated)";
-    case ncclProfilerProxyOpRecvTransmitted:   return "ProxyOpRecvTransmitted (deprecated)";
-    case ncclProfilerProxyOpRecvDone:          return "ProxyOpRecvDone (deprecated)";
-    case ncclProfilerProxyStepSendGPUWait:     return "ProxyStepSendGPUWait";
-    case ncclProfilerProxyStepSendWait:        return "ProxyStepSendWait";
-    case ncclProfilerProxyStepRecvWait:        return "ProxyStepRecvWait";
-    case ncclProfilerProxyStepRecvFlushWait:   return "ProxyStepRecvFlushWait";
-    case ncclProfilerProxyStepRecvGPUWait:     return "ProxyStepRecvGPUWait";
-    case ncclProfilerProxyCtrlIdle:            return "ProxyCtrlIdle";
-    case ncclProfilerProxyCtrlActive:          return "ProxyCtrlActive";
-    case ncclProfilerProxyCtrlSleep:           return "ProxyCtrlSleep";
-    case ncclProfilerProxyCtrlWakeup:          return "ProxyCtrlWakeup";
-    case ncclProfilerProxyCtrlAppend:          return "ProxyCtrlAppend";
-    case ncclProfilerProxyCtrlAppendEnd:       return "ProxyCtrlAppendEnd";
-    case ncclProfilerProxyOpInProgress_v4:     return "ProxyOpInProgress";
-    case ncclProfilerProxyStepSendPeerWait_v4: return "ProxyStepSendPeerWait";
-    case ncclProfilerNetPluginUpdate:          return "NetPluginUpdate";
-    case ncclProfilerKernelChStop:             return "KernelChStop";
-    case ncclProfilerEndGroupApiStart:         return "EndGroupApiStart";
-    case ncclProfilerBeginGroupApiEnd:         return "BeginGroupApiEnd";
-    default:                                   return "Unknown";
-  }
-}
-
-// ----------------------------------------------------------------------------
-// Logging Macros
-// ----------------------------------------------------------------------------
-
-// ============================================================================
-// SECTION 3: Data Structures
+// SECTION 2: Data Structures
 // ============================================================================
 
 // Forward declarations
@@ -596,6 +460,7 @@ struct MyContext {
   int nranks;
   double startTime;
   int cudaDev;                  // Physical GPU device ID (set once during init, never changes)
+  char gpuUuid[37];             // Physical GPU UUID string (36 chars + null terminator)
   
   EventPool pool;
   Blacklist blacklist;
@@ -660,67 +525,6 @@ static void unregisterContext(MyContext* ctx) {
   contextRegistry.erase(static_cast<void*>(ctx));
   pthread_mutex_unlock(&contextRegistryMutex);
 }
-
-// ----------------------------------------------------------------------------
-// Logging Helper Functions
-// ----------------------------------------------------------------------------
-
-// Helper function to log START events (handles both normal and detached PXN events)
-static void logStartEvent(MyEvent* event, void* parentObj, const char* fmt, ...) {
-  if (!event) return;
-  
-  pid_t pid = getpid();
-  pid_t tid = getTid();
-  
-  // Check if this is a detached PXN event
-  if (event->fromDetachPool) {
-    // Use process-wide detach log file
-    if (!detachLogFile) return;
-    
-    pthread_mutex_lock(&detachLogMutex);
-    if (*fmt != '\0') {
-      va_list args;
-      va_start(args, fmt);
-      fprintf(detachLogFile, "[%.3f] START %s (pid=%d, tid=%d, PXN from pid=%d, ", 
-              event->startTime - detachStartTime, event->typeName, 
-              static_cast<int>(pid), tid, static_cast<int>(event->originPid));
-      vfprintf(detachLogFile, fmt, args);
-      va_end(args);
-      fprintf(detachLogFile, ", parentObj=%p, event=%p)\n",
-              parentObj, static_cast<void*>(event));
-    } else {
-      fprintf(detachLogFile, "[%.3f] START %s (pid=%d, tid=%d, PXN from pid=%d, parentObj=%p, event=%p)\n",
-              event->startTime - detachStartTime, event->typeName, 
-              static_cast<int>(pid), tid, static_cast<int>(event->originPid),
-              parentObj, static_cast<void*>(event));
-    }
-    fflush(detachLogFile);
-    pthread_mutex_unlock(&detachLogMutex);
-  } else {
-    // Normal event - use context's log file
-    MyContext* ctx = event->ctx;
-    if (!ctx || !ctx->logFile) return;
-    
-    pthread_mutex_lock(&ctx->logMutex);
-    if (*fmt != '\0') {
-      va_list args;
-      va_start(args, fmt);
-      fprintf(ctx->logFile, "[%.3f] START %s (pid=%d, tid=%d, device=%d, ", 
-              event->startTime, event->typeName, static_cast<int>(pid), tid, ctx->cudaDev);
-      vfprintf(ctx->logFile, fmt, args);
-      va_end(args);
-      fprintf(ctx->logFile, ", parentObj=%p, event=%p, ctx=%p)\n",
-              parentObj, static_cast<void*>(event), static_cast<void*>(ctx));
-    } else {
-      fprintf(ctx->logFile, "[%.3f] START %s (pid=%d, tid=%d, device=%d, parentObj=%p, event=%p, ctx=%p)\n",
-              event->startTime, event->typeName, static_cast<int>(pid), tid, ctx->cudaDev,
-              parentObj, static_cast<void*>(event), static_cast<void*>(ctx));
-    }
-    fflush(ctx->logFile);
-    pthread_mutex_unlock(&ctx->logMutex);
-  }
-}
-
 
 // Initialize the detach pool (called on first communicator init)
 static bool initDetachPool() {
@@ -843,6 +647,200 @@ static void cleanupDetachPool() {
 }
 
 // ============================================================================
+// SECTION 2: Utility Functions
+// ============================================================================
+
+// ----------------------------------------------------------------------------
+// Time and Thread Helpers
+// ----------------------------------------------------------------------------
+
+// Get current timestamp in microseconds
+static double getTime() {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return ts.tv_sec * 1e6 + ts.tv_nsec * 1e-3;
+}
+
+// Get thread ID (Linux-specific)
+static inline pid_t getTid() {
+  return static_cast<pid_t>(syscall(SYS_gettid));
+}
+
+// ----------------------------------------------------------------------------
+// Directory and File Helpers
+// ----------------------------------------------------------------------------
+
+// Get dump directory name (SLURM job ID or timestamp)
+static const char* getDumpDir(char* dirname, size_t dirname_size) {
+  const char* slurm_job_id = getenv("SLURM_JOB_ID");
+  if (slurm_job_id && slurm_job_id[0] != '\0') {
+    snprintf(dirname, dirname_size, "minimal_profiler_dump-%s", slurm_job_id);
+    return dirname;
+  }
+  
+  struct timespec ts;
+  if (clock_gettime(CLOCK_REALTIME, &ts) != 0) {
+    return nullptr;
+  }
+  
+  struct tm* tm_info = localtime(&ts.tv_sec);
+  if (!tm_info) {
+    return nullptr;
+  }
+  
+  snprintf(dirname, dirname_size, "minimal_profiler_dump-%04d%02d%02d-%02d%02d%02d",
+           tm_info->tm_year + 1900,
+           tm_info->tm_mon + 1,
+           tm_info->tm_mday,
+           tm_info->tm_hour,
+           tm_info->tm_min,
+           tm_info->tm_sec);
+  
+  return dirname;
+}
+
+// Create dump directory if it doesn't exist
+static int ensureDumpDir(const char* dirname) {
+  struct stat st = {0};
+  
+  if (stat(dirname, &st) == 0) {
+    if (S_ISDIR(st.st_mode)) {
+      return 0;
+    } else {
+      return -1;
+    }
+  }
+  
+  if (mkdir(dirname, 0755) != 0) {
+    if (errno == EEXIST) {
+      if (stat(dirname, &st) == 0 && S_ISDIR(st.st_mode)) {
+        return 0;
+      }
+    }
+    return -1;
+  }
+  
+  return 0;
+}
+
+// ----------------------------------------------------------------------------
+// Logging Helper Functions
+// ----------------------------------------------------------------------------
+
+// Helper function to log START events (handles both normal and detached PXN events)
+static void logStartEvent(MyEvent* event, void* parentObj, const char* fmt, ...) {
+  if (!event) return;
+  
+  pid_t pid = getpid();
+  pid_t tid = getTid();
+  
+  // Check if this is a detached PXN event
+  if (event->fromDetachPool) {
+    // Use process-wide detach log file
+    if (!detachLogFile) return;
+    
+    pthread_mutex_lock(&detachLogMutex);
+    if (*fmt != '\0') {
+      va_list args;
+      va_start(args, fmt);
+      fprintf(detachLogFile, "[%.3f] START %s (pid=%d, tid=%d, PXN from pid=%d, ", 
+              event->startTime - detachStartTime, event->typeName, 
+              static_cast<int>(pid), tid, static_cast<int>(event->originPid));
+      vfprintf(detachLogFile, fmt, args);
+      va_end(args);
+      fprintf(detachLogFile, ", parentObj=%p, event=%p)\n",
+              parentObj, static_cast<void*>(event));
+    } else {
+      fprintf(detachLogFile, "[%.3f] START %s (pid=%d, tid=%d, PXN from pid=%d, parentObj=%p, event=%p)\n",
+              event->startTime - detachStartTime, event->typeName, 
+              static_cast<int>(pid), tid, static_cast<int>(event->originPid),
+              parentObj, static_cast<void*>(event));
+    }
+    fflush(detachLogFile);
+    pthread_mutex_unlock(&detachLogMutex);
+  } else {
+    // Normal event - use context's log file
+    MyContext* ctx = event->ctx;
+    if (!ctx || !ctx->logFile) return;
+    
+    pthread_mutex_lock(&ctx->logMutex);
+    if (*fmt != '\0') {
+      va_list args;
+      va_start(args, fmt);
+      fprintf(ctx->logFile, "[%.3f] START %s (pid=%d, tid=%d, gpu_uuid=%s, ", 
+              event->startTime, event->typeName, static_cast<int>(pid), tid, 
+              ctx->gpuUuid[0] != '\0' ? ctx->gpuUuid : "unknown");
+      vfprintf(ctx->logFile, fmt, args);
+      va_end(args);
+      fprintf(ctx->logFile, ", parentObj=%p, event=%p, ctx=%p)\n",
+              parentObj, static_cast<void*>(event), static_cast<void*>(ctx));
+    } else {
+      fprintf(ctx->logFile, "[%.3f] START %s (pid=%d, tid=%d, gpu_uuid=%s, parentObj=%p, event=%p, ctx=%p)\n",
+              event->startTime, event->typeName, static_cast<int>(pid), tid, 
+              ctx->gpuUuid[0] != '\0' ? ctx->gpuUuid : "unknown",
+              parentObj, static_cast<void*>(event), static_cast<void*>(ctx));
+    }
+    fflush(ctx->logFile);
+    pthread_mutex_unlock(&ctx->logMutex);
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Type and State Name Mappers
+// ----------------------------------------------------------------------------
+
+// Get human-readable event type name
+static const char* getEventTypeName(uint64_t type) {
+  switch (type) {
+    case ncclProfileGroupApi:     return "ncclProfileGroupApi";
+    case ncclProfileCollApi:      return "ncclProfileCollApi";
+    case ncclProfileP2pApi:       return "ncclProfileP2pApi";
+    case ncclProfileKernelLaunch: return "ncclProfileKernelLaunch";
+    case ncclProfileColl:         return "ncclProfileColl";
+    case ncclProfileP2p:          return "ncclProfileP2p";
+    case ncclProfileProxyOp:      return "ncclProfileProxyOp";
+    case ncclProfileProxyStep:    return "ncclProfileProxyStep";
+    case ncclProfileProxyCtrl:    return "ncclProfileProxyCtrl";
+    case ncclProfileKernelCh:     return "ncclProfileKernelCh";
+    case ncclProfileNetPlugin:    return "ncclProfileNetPlugin";
+    case ncclProfileGroup:        return "ncclProfileGroup";
+    default:                      return "ncclProfileUnknown";
+  }
+}
+
+// Get human-readable state name
+static const char* getStateName(ncclProfilerEventState_v5_t eState) {
+  switch (eState) {
+    case ncclProfilerProxyOpSendPosted:        return "ProxyOpSendPosted (deprecated)";
+    case ncclProfilerProxyOpSendRemFifoWait:   return "ProxyOpSendRemFifoWait (deprecated)";
+    case ncclProfilerProxyOpSendTransmitted:   return "ProxyOpSendTransmitted (deprecated)";
+    case ncclProfilerProxyOpSendDone:          return "ProxyOpSendDone (deprecated)";
+    case ncclProfilerProxyOpRecvPosted:        return "ProxyOpRecvPosted (deprecated)";
+    case ncclProfilerProxyOpRecvReceived:      return "ProxyOpRecvReceived (deprecated)";
+    case ncclProfilerProxyOpRecvTransmitted:   return "ProxyOpRecvTransmitted (deprecated)";
+    case ncclProfilerProxyOpRecvDone:          return "ProxyOpRecvDone (deprecated)";
+    case ncclProfilerProxyStepSendGPUWait:     return "ProxyStepSendGPUWait";
+    case ncclProfilerProxyStepSendWait:        return "ProxyStepSendWait";
+    case ncclProfilerProxyStepRecvWait:        return "ProxyStepRecvWait";
+    case ncclProfilerProxyStepRecvFlushWait:   return "ProxyStepRecvFlushWait";
+    case ncclProfilerProxyStepRecvGPUWait:     return "ProxyStepRecvGPUWait";
+    case ncclProfilerProxyCtrlIdle:            return "ProxyCtrlIdle";
+    case ncclProfilerProxyCtrlActive:          return "ProxyCtrlActive";
+    case ncclProfilerProxyCtrlSleep:           return "ProxyCtrlSleep";
+    case ncclProfilerProxyCtrlWakeup:          return "ProxyCtrlWakeup";
+    case ncclProfilerProxyCtrlAppend:          return "ProxyCtrlAppend";
+    case ncclProfilerProxyCtrlAppendEnd:       return "ProxyCtrlAppendEnd";
+    case ncclProfilerProxyOpInProgress_v4:     return "ProxyOpInProgress";
+    case ncclProfilerProxyStepSendPeerWait_v4: return "ProxyStepSendPeerWait";
+    case ncclProfilerNetPluginUpdate:          return "NetPluginUpdate";
+    case ncclProfilerKernelChStop:             return "KernelChStop";
+    case ncclProfilerEndGroupApiStart:         return "EndGroupApiStart";
+    case ncclProfilerBeginGroupApiEnd:         return "BeginGroupApiEnd";
+    default:                                   return "Unknown";
+  }
+}
+
+// ============================================================================
 // SECTION 5: Profiler API Implementation
 // ============================================================================
 extern "C" {
@@ -904,6 +902,7 @@ ncclResult_t myInit(void** context, uint64_t commId, int* eActivationMask,
   ctx->startTime = getTime();
   ctx->logFile = nullptr;
   ctx->cudaDev = -1;  // Initialize to invalid value
+  ctx->gpuUuid[0] = '\0';  // Initialize to empty string
   
   // Get the CUDA device ID for this communicator (set once, never changes)
   cudaError_t cudaErr = cudaGetDevice(&ctx->cudaDev);
@@ -912,6 +911,26 @@ ncclResult_t myInit(void** context, uint64_t commId, int* eActivationMask,
     fprintf(stderr, "[MinimalProfiler] WARNING: Failed to get CUDA device: %s\n", 
             cudaGetErrorString(cudaErr));
     ctx->cudaDev = -1;
+  } else {
+    // Get device properties to extract UUID (more reliable than device ID)
+    cudaDeviceProp deviceProp;
+    cudaErr = cudaGetDeviceProperties(&deviceProp, ctx->cudaDev);
+    if (cudaErr == cudaSuccess) {
+      // Format UUID as standard string: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+      snprintf(ctx->gpuUuid, sizeof(ctx->gpuUuid),
+               "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+               deviceProp.uuid.bytes[0], deviceProp.uuid.bytes[1],
+               deviceProp.uuid.bytes[2], deviceProp.uuid.bytes[3],
+               deviceProp.uuid.bytes[4], deviceProp.uuid.bytes[5],
+               deviceProp.uuid.bytes[6], deviceProp.uuid.bytes[7],
+               deviceProp.uuid.bytes[8], deviceProp.uuid.bytes[9],
+               deviceProp.uuid.bytes[10], deviceProp.uuid.bytes[11],
+               deviceProp.uuid.bytes[12], deviceProp.uuid.bytes[13],
+               deviceProp.uuid.bytes[14], deviceProp.uuid.bytes[15]);
+    } else {
+      fprintf(stderr, "[MinimalProfiler] WARNING: Failed to get device properties: %s\n", 
+              cudaGetErrorString(cudaErr));
+    }
   }
   
   // Initialize mutexes
@@ -955,6 +974,7 @@ ncclResult_t myInit(void** context, uint64_t commId, int* eActivationMask,
   fprintf(ctx->logFile, "Event pool size: %zu\n", INITIAL_POOL_SIZE);
   fprintf(ctx->logFile, "Blacklist cap: %zu\n", BLACKLIST_CAP);
   fprintf(ctx->logFile, "Physical GPU device ID: %d\n", ctx->cudaDev);
+  fprintf(ctx->logFile, "Physical GPU UUID: %s\n", ctx->gpuUuid[0] != '\0' ? ctx->gpuUuid : "(unknown)");
   fprintf(ctx->logFile, "Rank: %d/%d, CommId: %lu, CommName: %s, ctx=%p\n", 
            rank, nranks, commId, commName ? commName : "(null)", static_cast<void*>(ctx));
   fflush(ctx->logFile);
@@ -1196,7 +1216,7 @@ ncclResult_t myStopEvent(void* eHandle) {
           event->func ? event->func : "Unknown",
           static_cast<int>(pid),
           tid,
-          ctx->cudaDev,
+          ctx->gpuUuid[0] != '\0' ? ctx->gpuUuid : "unknown",
           duration,
           static_cast<void*>(event),
           static_cast<void*>(ctx));
@@ -1279,14 +1299,14 @@ ncclResult_t myRecordEventState(void* eHandle,
   }
   
   pthread_mutex_lock(&ctx->logMutex);
-  fprintf(ctx->logFile, "[%.3f] STATE %s::%s -> %s (pid=%d, tid=%d, device=%d, stateId=%d",
+  fprintf(ctx->logFile, "[%.3f] STATE %s::%s -> %s (pid=%d, tid=%d, gpu_uuid=%s, stateId=%d",
           currentTime,
           event->typeName ? event->typeName : "ncclProfileUnknown",
           event->func ? event->func : "Unknown",
           stateName,
           static_cast<int>(pid),
           tid,
-          ctx->cudaDev,
+          ctx->gpuUuid[0] != '\0' ? ctx->gpuUuid : "unknown",
           static_cast<int>(eState));
   
   // Log additional state args based on state type
