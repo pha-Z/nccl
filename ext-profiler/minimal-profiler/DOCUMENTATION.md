@@ -825,7 +825,9 @@ or (if not running under SLURM):
 
 **Writing Strategy:**
 
-All ranks within a distributed job write to the same file using POSIX append mode (`O_APPEND`). This leverages the POSIX guarantee that writes opened with `O_APPEND` are atomic for sizes up to `PIPE_BUF` (typically 4096 bytes on Linux). Each JSON line is written atomically with a single `fprintf` + `fflush` operation, protected by a process-wide mutex (`jsonlFileMutex`).
+All ranks within a distributed job write to the same file using POSIX append mode (`O_APPEND`). Each JSON line is written atomically with a single `fprintf` + `fflush` operation, protected by a process-wide mutex (`jsonlFileMutex`). 
+
+JSON construction uses dynamic `std::string` allocation, so there are no fixed buffer size limits. Events can have any number of state transitions and any amount of details. While POSIX guarantees atomic writes up to `PIPE_BUF` (typically 4096 bytes), larger writes are typically atomic on modern systems. We prioritize complete event capture over strict atomicity guarantees for very large events.
 
 **JSON Line Structure:**
 
@@ -1025,21 +1027,23 @@ struct Blacklist {
 #### StateTransition
 
 Stores a single state transition during an event's lifecycle (for JSONL output).
+Uses dynamic `std::string` for state name and details - no fixed size limits.
 
 ```cpp
 struct StateTransition {
   double timestamp;              // When the state transition occurred (microseconds)
-  const char* stateName;         // Human-readable state name
+  std::string stateName;         // Human-readable state name (dynamic)
   int stateId;                   // Numeric state ID
   pid_t tid;                     // Thread ID when state was recorded
   pid_t pid;                     // Process ID when state was recorded
-  char details[STATE_DETAILS_MAX]; // State-specific details as JSON fragment
+  std::string details;           // State-specific details as JSON fragment (dynamic)
 };
 ```
 
 #### MyEvent
 
 Stores metadata for a single profiled event, including buffered state transitions for JSONL output.
+Uses dynamic containers (`std::vector`, `std::string`) - no limits on number of states or size of details.
 
 ```cpp
 struct MyEvent {
@@ -1055,29 +1059,30 @@ struct MyEvent {
   pid_t originPid;        // PID that originated this event (for PXN tracking)
   
   // Start event details (captured at START for JSONL output)
-  pid_t startTid;                        // Thread ID at start
-  pid_t startPid;                        // Process ID at start
-  char startDetails[START_DETAILS_MAX];  // Type-specific details JSON from START
+  pid_t startTid;                 // Thread ID at start
+  pid_t startPid;                 // Process ID at start
+  std::string startDetails;       // Type-specific details JSON from START (dynamic)
   
   // Context-dependent fields captured at START (safe for PXN - copied, not pointer)
   char gpuUuid[64];       // GPU UUID (empty for PXN events)
   uint64_t commId;        // Communicator ID (0 for PXN events)
   int rank;               // Rank (-1 for PXN events)
   
-  // State transitions buffer (accumulated during event lifetime)
-  StateTransition states[MAX_STATES_PER_EVENT];
-  int stateCount;         // Number of states recorded so far
+  // State transitions (accumulated during event lifetime) - dynamic vector, no limit
+  std::vector<StateTransition> states;
 };
 ```
 
 **Lifecycle:**
 1. Allocated by `EventPool::allocate()` or `allocateFromDetachPool()`
 2. Basic fields populated in `myStartEvent()`, including `startDetails` JSON and context-dependent fields
-3. State transitions accumulated in `myRecordEventState()` (appended to `states` array)
+3. State transitions accumulated in `myRecordEventState()` (pushed to `states` vector)
 4. Complete event written to JSONL in `myStopEvent()` (all buffered data included)
 5. Freed by `EventPool::free()` or `freeToDetachPool()`
 
 **Note on PXN Safety:** The `gpuUuid`, `commId`, and `rank` fields are copied from the context at START time (for normal events) or set to empty/default values (for PXN events). This ensures these values are safe to access at STOP time even for PXN events where the original context pointer is invalid.
+
+**Note on Dynamic Allocation:** The use of `std::vector` and `std::string` means there are no arbitrary limits on the number of state transitions or size of details. Memory is allocated as needed and freed when the event is deallocated.
 
 #### EventPool
 
@@ -1293,10 +1298,8 @@ ncclProfileGroupApi
 | `INITIAL_POOL_SIZE` | 1024 | Initial slots per per-context pool chunk |
 | `INITIAL_DETACH_POOL_SIZE` | 256 | Initial slots per detach pool chunk |
 | `BLACKLIST_CAP` | 10,000,000 | Maximum entries in any blacklist |
-| `JSONL_LINE_MAX` | 4000 | Maximum length of a single JSONL line (under 4KB for atomicity) |
-| `MAX_STATES_PER_EVENT` | 64 | Maximum state transitions buffered per event |
-| `STATE_DETAILS_MAX` | 128 | Maximum size for state-specific details JSON fragment |
-| `START_DETAILS_MAX` | 2048 | Maximum size for start event details JSON fragment |
+
+**Note on JSONL Output:** The profiler uses dynamic `std::string` and `std::vector` for JSON construction, so there are no fixed buffer size limits. Events can have any number of state transitions and any size of details.
 
 **Configuration Value Trade-offs:**
 
