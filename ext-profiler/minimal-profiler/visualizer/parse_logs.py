@@ -7,7 +7,7 @@ import re
 import json
 import sys
 from pathlib import Path
-from collections import defaultdict
+from collections import defaultdict, Counter
 from typing import Dict, List, Optional, Tuple, DefaultDict
 
 def parse_timestamp(line: str) -> Optional[float]:
@@ -52,11 +52,29 @@ def parse_commid_from_filename(filename: str) -> Optional[str]:
     """Extract communicator ID from filename.
     
     Filename format: minimal_profiler_rank{rank}_comm{commId}.log
+    or: minimal_profiler_pxn_events_pid{pid}_comm{commId}.log
     Returns commId as string (it's a large uint64).
     """
     match = re.search(r'comm(\d+)', filename)
     if match:
         return match.group(1)
+    return None
+
+def parse_pid_from_pxn_filename(filename: str) -> Optional[int]:
+    """Extract PID from PXN log filename.
+    
+    Filename format: minimal_profiler_pxn_events_pid{pid}_comm{commId}.log
+    """
+    match = re.search(r'pxn_events_pid(\d+)', filename)
+    if match:
+        return int(match.group(1))
+    return None
+
+def parse_origin_pid(line: str) -> Optional[int]:
+    """Extract origin PID from PXN event line (from "PXN from pid=" field)."""
+    match = re.search(r'PXN from pid=(\d+)', line)
+    if match:
+        return int(match.group(1))
     return None
 
 def simplify_type_name(type_name: str) -> str:
@@ -106,8 +124,13 @@ def parse_device_id(line: str) -> Optional[int]:
         return int(match.group(1))
     return None
 
-def parse_start_event(line: str) -> Optional[Dict]:
-    """Parse a START event line."""
+def parse_start_event(line: str, require_ctx: bool = True) -> Optional[Dict]:
+    """Parse a START event line.
+    
+    Args:
+        line: The log line to parse
+        require_ctx: If True, ctx is required (normal events). If False, ctx is optional (PXN events).
+    """
     timestamp = parse_timestamp(line)
     event_addr = parse_event_address(line)
     ctx = parse_context(line)
@@ -115,8 +138,12 @@ def parse_start_event(line: str) -> Optional[Dict]:
     tid = parse_tid(line)
     pid = parse_pid(line)
     device_id = parse_device_id(line)
+    origin_pid = parse_origin_pid(line)  # For PXN events
     
-    if not timestamp or not event_addr or not ctx:
+    # Validate required fields
+    if not timestamp or not event_addr:
+        return None
+    if require_ctx and not ctx:
         return None
     
     # Extract event descriptor type (e.g., "ncclProfileCollApi")
@@ -132,8 +159,8 @@ def parse_start_event(line: str) -> Optional[Dict]:
     # Extract function name if present
     func = details.pop('func', None)
     
-    # Extract sequence number if present (for Coll events)
-    seq_number = details.pop('seq', None)
+    # Extract sequence number if present (for Coll events, not PXN)
+    seq_number = details.pop('seq', None) if require_ctx else None
     
     # Remove tid, pid, and device from details since we store them separately
     details.pop('tid', None)
@@ -143,30 +170,45 @@ def parse_start_event(line: str) -> Optional[Dict]:
     event_info = {
         'timestamp': timestamp,
         'event_addr': event_addr,
-        'ctx': ctx,
-        'parent_obj': parent_obj,  # Add parent object address
+        'ctx': ctx,  # None for PXN events
+        'parent_obj': parent_obj,
         'type': simplify_type_name(event_type_name),
-        'type_name': event_type_name,  # Keep original event descriptor type name
+        'type_name': event_type_name,
         'func': func,
-        'seq_number': seq_number,  # Store sequence number as top-level field
-        'tid': tid,  # Thread ID that started the event
-        'pid': pid,  # Process ID that started the event
-        'device_id': device_id,  # Physical GPU device ID
+        'tid': tid,
+        'pid': pid,
         'details': details
     }
     
+    # Add optional fields
+    if seq_number is not None:
+        event_info['seq_number'] = seq_number
+    if device_id is not None:
+        event_info['device_id'] = device_id
+    if origin_pid is not None:
+        event_info['origin_pid'] = origin_pid
+    
     return event_info
 
-def parse_stop_event(line: str) -> Optional[Dict]:
-    """Parse a STOP event line."""
+def parse_stop_event(line: str, require_ctx: bool = True) -> Optional[Dict]:
+    """Parse a STOP event line.
+    
+    Args:
+        line: The log line to parse
+        require_ctx: If True, ctx is required (normal events). If False, ctx is optional (PXN events).
+    """
     timestamp = parse_timestamp(line)
     event_addr = parse_event_address(line)
     ctx = parse_context(line)
     tid = parse_tid(line)
     pid = parse_pid(line)
     device_id = parse_device_id(line)
+    origin_pid = parse_origin_pid(line)  # For PXN events
     
-    if not timestamp or not event_addr or not ctx:
+    # Validate required fields
+    if not timestamp or not event_addr:
+        return None
+    if require_ctx and not ctx:
         return None
     
     # Extract event descriptor type and function name from STOP line
@@ -187,29 +229,45 @@ def parse_stop_event(line: str) -> Optional[Dict]:
     details.pop('pid', None)
     details.pop('device', None)
     
-    return {
+    result = {
         'timestamp': timestamp,
         'event_addr': event_addr,
-        'ctx': ctx,
+        'ctx': ctx,  # None for PXN events
         'type_name': type_name,
         'func': func,
         'duration': duration,
-        'tid': tid,  # Thread ID that stopped the event
-        'pid': pid,  # Process ID that stopped the event
-        'device_id': device_id,  # Physical GPU device ID
+        'tid': tid,
+        'pid': pid,
         'details': details
     }
+    
+    # Add optional fields
+    if device_id is not None:
+        result['device_id'] = device_id
+    if origin_pid is not None:
+        result['origin_pid'] = origin_pid
+    
+    return result
 
-def parse_state_event(line: str) -> Optional[Dict]:
-    """Parse a STATE event line."""
+def parse_state_event(line: str, require_ctx: bool = True) -> Optional[Dict]:
+    """Parse a STATE event line.
+    
+    Args:
+        line: The log line to parse
+        require_ctx: If True, ctx is required (normal events). If False, ctx is optional (PXN events).
+    """
     timestamp = parse_timestamp(line)
     event_addr = parse_event_address(line)
     ctx = parse_context(line)
     tid = parse_tid(line)
     pid = parse_pid(line)
     device_id = parse_device_id(line)
+    origin_pid = parse_origin_pid(line)  # For PXN events
     
-    if not timestamp or not event_addr or not ctx:
+    # Validate required fields
+    if not timestamp or not event_addr:
+        return None
+    if require_ctx and not ctx:
         return None
     
     # Extract event descriptor type and function name
@@ -235,19 +293,26 @@ def parse_state_event(line: str) -> Optional[Dict]:
     details.pop('pid', None)
     details.pop('device', None)
     
-    return {
+    result = {
         'timestamp': timestamp,
         'event_addr': event_addr,
-        'ctx': ctx,
-        'device_id': device_id,  # Physical GPU device ID
+        'ctx': ctx,  # None for PXN events
         'type_name': type_name,
         'func': func,
         'state_name': state_name,
         'state_id': state_id,
-        'tid': tid,  # Thread ID that recorded the state
-        'pid': pid,  # Process ID that recorded the state
+        'tid': tid,
+        'pid': pid,
         'details': details
     }
+    
+    # Add optional fields
+    if device_id is not None:
+        result['device_id'] = device_id
+    if origin_pid is not None:
+        result['origin_pid'] = origin_pid
+    
+    return result
 
 def parse_log_header(filepath: Path) -> Dict:
     """Parse the header section of a log file to extract metadata.
@@ -348,6 +413,240 @@ def parse_log_footer(filepath: Path) -> Dict:
     
     return footer_info
 
+def _parse_events_from_file(filepath: Path, is_pxn: bool, rank: Optional[int], pid: Optional[int], 
+                             commid: Optional[str], device_id: Optional[int] = None) -> Dict:
+    """Unified function to parse events from a log file (both normal and PXN).
+    
+    Args:
+        filepath: Path to the log file
+        is_pxn: True if parsing PXN log file, False for normal log file
+        rank: Rank number (None for PXN events initially)
+        pid: Process ID (None for normal events, used for PXN events)
+        commid: Communicator ID
+        device_id: Device ID from header (None for PXN events)
+    
+    Returns:
+        Dictionary of events keyed by unique_id
+    """
+    events = {}
+    active_events_by_addr = defaultdict(list)
+    
+    def make_unique_id(event_addr: str, start_ts: float) -> str:
+        """Create a unique identifier for an event."""
+        if is_pxn:
+            return f"{event_addr}_PXN_pid{pid}_comm{commid}_{start_ts:.3f}"
+        else:
+            return f"{event_addr}_rank{rank}_comm{commid}_{start_ts:.3f}"
+    
+    def find_active_event(event_addr: str, ctx: Optional[str], timestamp: float) -> Optional[str]:
+        """Find the active event with this address that matches the timestamp."""
+        # For PXN events, ctx is always None
+        key = (event_addr, ctx if not is_pxn else None)
+        if key not in active_events_by_addr:
+            return None
+        
+        candidates = []
+        for unique_id, start_ts in active_events_by_addr[key]:
+            event = events.get(unique_id)
+            if event and event['start'] is not None:
+                if event['stop'] is None:
+                    if start_ts <= timestamp:
+                        candidates.append((unique_id, start_ts))
+        
+        if not candidates:
+            return None
+        
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        return candidates[0][0]
+    
+    def create_event_from_start(start_info: Dict, event_addr: str, start_ts: float, ctx: Optional[str]) -> Dict:
+        """Create an event dictionary from START event info."""
+        event_device_id = None
+        if not is_pxn:
+            # Use device_id from event if available, otherwise from header
+            event_device_id = start_info.get('device_id') if start_info.get('device_id') is not None else device_id
+        
+        event = {
+            'start': start_ts,
+            'stop': None,
+            'states': [],
+            'type': start_info['type'],
+            'type_name': start_info.get('type_name'),
+            'func': start_info.get('func'),
+            'start_tid': start_info.get('tid'),
+            'start_pid': start_info.get('pid'),
+            'stop_tid': None,
+            'stop_pid': None,
+            'details': start_info.get('details', {}).copy(),
+            'ctx': ctx if not is_pxn else None,
+            'rank': rank,
+            'commid': commid,
+            'device_id': event_device_id,
+            'event_addr': event_addr,
+            'parent_obj': start_info.get('parent_obj')
+        }
+        
+        # Add optional fields
+        if not is_pxn and start_info.get('seq_number') is not None:
+            event['seq_number'] = start_info.get('seq_number')
+        if is_pxn and start_info.get('origin_pid') is not None:
+            event['origin_pid'] = start_info.get('origin_pid')
+        
+        return event
+    
+    def create_event_from_stop(stop_info: Dict, event_addr: str, stop_ts: float, ctx: Optional[str]) -> Dict:
+        """Create an event dictionary from STOP event info (when no matching START found)."""
+        event_device_id = None
+        if not is_pxn:
+            event_device_id = stop_info.get('device_id') if stop_info.get('device_id') is not None else device_id
+        
+        event = {
+            'start': None,
+            'stop': stop_ts,
+            'states': [],
+            'type': simplify_type_name(stop_info.get('type_name', '')),
+            'type_name': stop_info.get('type_name'),
+            'func': stop_info.get('func'),
+            'start_tid': None,
+            'start_pid': None,
+            'stop_tid': stop_info.get('tid'),
+            'stop_pid': stop_info.get('pid'),
+            'details': stop_info.get('details', {}),
+            'ctx': ctx if not is_pxn else None,
+            'rank': rank,
+            'commid': commid,
+            'device_id': event_device_id,
+            'event_addr': event_addr
+        }
+        
+        if is_pxn and stop_info.get('origin_pid') is not None:
+            event['origin_pid'] = stop_info.get('origin_pid')
+        
+        return event
+    
+    def create_event_from_state(state_info: Dict, event_addr: str, state_ts: float, ctx: Optional[str]) -> Dict:
+        """Create an event dictionary from STATE event info (when no matching START found)."""
+        event_device_id = None
+        if not is_pxn:
+            event_device_id = state_info.get('device_id') if state_info.get('device_id') is not None else device_id
+        
+        event = {
+            'start': None,
+            'stop': None,
+            'states': [{
+                'timestamp': state_ts,
+                'state_name': state_info['state_name'],
+                'state_id': state_info['state_id'],
+                'tid': state_info.get('tid'),
+                'pid': state_info.get('pid'),
+                'details': state_info['details']
+            }],
+            'type': simplify_type_name(state_info.get('type_name', '')),
+            'type_name': state_info.get('type_name'),
+            'func': state_info.get('func'),
+            'start_tid': None,
+            'start_pid': None,
+            'stop_tid': None,
+            'stop_pid': None,
+            'details': {},
+            'ctx': ctx if not is_pxn else None,
+            'rank': rank,
+            'commid': commid,
+            'device_id': event_device_id,
+            'event_addr': event_addr
+        }
+        
+        if is_pxn and state_info.get('origin_pid') is not None:
+            event['origin_pid'] = state_info.get('origin_pid')
+        
+        return event
+    
+    with open(filepath, 'r') as f:
+        for line in f:
+            # Parse START events
+            start_condition = 'START' in line and ('PXN from pid=' in line if is_pxn else True)
+            if start_condition:
+                start_info = parse_start_event(line, require_ctx=not is_pxn)
+                if start_info:
+                    event_addr = start_info['event_addr']
+                    start_ts = start_info['timestamp']
+                    ctx = start_info['ctx']
+                    
+                    unique_id = make_unique_id(event_addr, start_ts)
+                    events[unique_id] = create_event_from_start(start_info, event_addr, start_ts, ctx)
+                    
+                    # Track as active
+                    active_events_by_addr[(event_addr, ctx if not is_pxn else None)].append((unique_id, start_ts))
+            
+            # Parse STOP events
+            elif 'STOP' in line and 'STATE' not in line:
+                stop_condition = 'PXN' in line if is_pxn else True
+                if stop_condition:
+                    stop_info = parse_stop_event(line, require_ctx=not is_pxn)
+                    if stop_info:
+                        event_addr = stop_info['event_addr']
+                        stop_ts = stop_info['timestamp']
+                        ctx = stop_info['ctx']
+                        
+                        unique_id = find_active_event(event_addr, ctx, stop_ts)
+                        if unique_id:
+                            events[unique_id]['stop'] = stop_ts
+                            events[unique_id]['stop_tid'] = stop_info.get('tid')
+                            events[unique_id]['stop_pid'] = stop_info.get('pid')
+                            
+                            # Update optional fields
+                            if not is_pxn:
+                                if events[unique_id].get('device_id') is None and stop_info.get('device_id') is not None:
+                                    events[unique_id]['device_id'] = stop_info.get('device_id')
+                            else:
+                                if events[unique_id].get('origin_pid') is None:
+                                    events[unique_id]['origin_pid'] = stop_info.get('origin_pid')
+                            
+                            if events[unique_id]['func'] is None:
+                                events[unique_id]['func'] = stop_info.get('func')
+                            if events[unique_id].get('type_name') is None:
+                                events[unique_id]['type_name'] = stop_info.get('type_name')
+                            if stop_info.get('details'):
+                                events[unique_id]['details'].update(stop_info['details'])
+                        else:
+                            # No active event found - create a new one with just stop time
+                            unique_id = make_unique_id(event_addr, stop_ts)
+                            events[unique_id] = create_event_from_stop(stop_info, event_addr, stop_ts, ctx)
+            
+            # Parse STATE events
+            elif 'STATE' in line:
+                state_condition = 'PXN from pid=' in line if is_pxn else True
+                if state_condition:
+                    state_info = parse_state_event(line, require_ctx=not is_pxn)
+                    if state_info:
+                        event_addr = state_info['event_addr']
+                        state_ts = state_info['timestamp']
+                        ctx = state_info['ctx']
+                        
+                        unique_id = find_active_event(event_addr, ctx, state_ts)
+                        if unique_id:
+                            events[unique_id]['states'].append({
+                                'timestamp': state_ts,
+                                'state_name': state_info['state_name'],
+                                'state_id': state_info['state_id'],
+                                'tid': state_info.get('tid'),
+                                'pid': state_info.get('pid'),
+                                'details': state_info['details']
+                            })
+                            if events[unique_id]['func'] is None:
+                                events[unique_id]['func'] = state_info.get('func')
+                            if events[unique_id].get('type_name') is None:
+                                events[unique_id]['type_name'] = state_info.get('type_name')
+                            if is_pxn and events[unique_id].get('origin_pid') is None:
+                                events[unique_id]['origin_pid'] = state_info.get('origin_pid')
+                        else:
+                            # No active event found - create a new one with just this state
+                            unique_id = make_unique_id(event_addr, state_ts)
+                            events[unique_id] = create_event_from_state(state_info, event_addr, state_ts, ctx)
+                            active_events_by_addr[(event_addr, ctx if not is_pxn else None)].append((unique_id, state_ts))
+    
+    return events
+
 def parse_log_file(filepath: Path) -> Tuple[int, str, Dict]:
     """Parse a single log file and return rank, commId, and events.
     
@@ -373,186 +672,9 @@ def parse_log_file(filepath: Path) -> Tuple[int, str, Dict]:
     # Get device ID from header (fallback to None if not found)
     device_id = header.get('device_id')
     
-    events = {}  # key: unique_id (event_addr_rank_commid_starttimestamp), value: event data
-    # Track active events by address to match STOP/STATE to the right event
-    # Maps (event_addr, ctx) -> list of (unique_id, start_timestamp) for active events
-    active_events_by_addr = defaultdict(list)
-    
-    def make_unique_id(event_addr: str, start_ts: float) -> str:
-        """Create a unique identifier for an event."""
-        return f"{event_addr}_rank{rank}_comm{commid}_{start_ts:.3f}"
-    
-    def find_active_event(event_addr: str, ctx: str, timestamp: float) -> Optional[str]:
-        """Find the active event with this address that matches the timestamp.
-        Returns the unique_id of the matching event, or None if not found.
-        """
-        key = (event_addr, ctx)
-        if key not in active_events_by_addr:
-            return None
-        
-        # Find the most recent active event that started before this timestamp
-        # and hasn't been stopped yet
-        candidates = []
-        for unique_id, start_ts in active_events_by_addr[key]:
-            event = events.get(unique_id)
-            if event and event['start'] is not None:
-                # Event is active only if it hasn't been stopped yet
-                if event['stop'] is None:
-                    if start_ts <= timestamp:
-                        candidates.append((unique_id, start_ts))
-        
-        if not candidates:
-            return None
-        
-        # Return the most recent one (highest start_ts that's still <= timestamp)
-        candidates.sort(key=lambda x: x[1], reverse=True)
-        return candidates[0][0]
-    
-    with open(filepath, 'r') as f:
-        for line in f:
-            # Parse START events
-            if 'START' in line:
-                start_info = parse_start_event(line)
-                if start_info:
-                    event_addr = start_info['event_addr']
-                    start_ts = start_info['timestamp']
-                    ctx = start_info['ctx']
-                    
-                    # Create unique ID
-                    unique_id = make_unique_id(event_addr, start_ts)
-                    
-                    # Create new event
-                    # Use device_id from event if available, otherwise from header
-                    event_device_id = start_info.get('device_id') if start_info.get('device_id') is not None else device_id
-                    events[unique_id] = {
-                        'start': start_ts,
-                        'stop': None,
-                        'states': [],
-                        'type': start_info['type'],
-                        'type_name': start_info.get('type_name'),
-                        'func': start_info.get('func'),
-                        'seq_number': start_info.get('seq_number'),  # Store sequence number
-                        'start_tid': start_info.get('tid'),  # Thread ID that started the event
-                        'start_pid': start_info.get('pid'),  # Process ID that started the event
-                        'stop_tid': None,  # Will be set when STOP is parsed
-                        'stop_pid': None,  # Will be set when STOP is parsed
-                        'details': start_info.get('details', {}).copy(),
-                        'ctx': ctx,
-                        'rank': rank,
-                        'commid': commid,  # Communicator ID from filename
-                        'device_id': event_device_id,  # Physical GPU device ID
-                        'event_addr': event_addr,
-                        'parent_obj': start_info.get('parent_obj')  # Store parent object address
-                    }
-                    
-                    # Track as active
-                    active_events_by_addr[(event_addr, ctx)].append((unique_id, start_ts))
-            
-            # Parse STOP events
-            elif 'STOP' in line and 'STATE' not in line:
-                stop_info = parse_stop_event(line)
-                if stop_info:
-                    event_addr = stop_info['event_addr']
-                    stop_ts = stop_info['timestamp']
-                    ctx = stop_info['ctx']
-                    
-                    # Find the active event
-                    unique_id = find_active_event(event_addr, ctx, stop_ts)
-                    if unique_id:
-                        events[unique_id]['stop'] = stop_ts
-                        events[unique_id]['stop_tid'] = stop_info.get('tid')  # Thread ID that stopped the event
-                        events[unique_id]['stop_pid'] = stop_info.get('pid')  # Process ID that stopped the event
-                        # Update device_id if available from stop event and not already set
-                        if events[unique_id].get('device_id') is None and stop_info.get('device_id') is not None:
-                            events[unique_id]['device_id'] = stop_info.get('device_id')
-                        if events[unique_id]['func'] is None:
-                            events[unique_id]['func'] = stop_info.get('func')
-                        if events[unique_id].get('type_name') is None:
-                            events[unique_id]['type_name'] = stop_info.get('type_name')
-                        # Merge additional details from stop event
-                        if stop_info.get('details'):
-                            events[unique_id]['details'].update(stop_info['details'])
-                    else:
-                        # No active event found - create a new one with just stop time
-                        # Use stop_ts as the unique identifier component
-                        # Use device_id from event if available, otherwise from header
-                        event_device_id = stop_info.get('device_id') if stop_info.get('device_id') is not None else device_id
-                        unique_id = make_unique_id(event_addr, stop_ts)
-                        events[unique_id] = {
-                            'start': None,
-                            'stop': stop_ts,
-                            'states': [],
-                            'type': simplify_type_name(stop_info.get('type_name', '')),
-                            'type_name': stop_info.get('type_name'),
-                            'func': stop_info.get('func'),
-                            'start_tid': None,
-                            'start_pid': None,
-                            'stop_tid': stop_info.get('tid'),  # Thread ID that stopped the event
-                            'stop_pid': stop_info.get('pid'),  # Process ID that stopped the event
-                            'details': stop_info.get('details', {}),
-                            'ctx': ctx,
-                            'rank': rank,
-                            'commid': commid,  # Communicator ID from filename
-                            'device_id': event_device_id,  # Physical GPU device ID
-                            'event_addr': event_addr
-                        }
-            
-            # Parse STATE events
-            elif 'STATE' in line:
-                state_info = parse_state_event(line)
-                if state_info:
-                    event_addr = state_info['event_addr']
-                    state_ts = state_info['timestamp']
-                    ctx = state_info['ctx']
-                    
-                    # Find the active event
-                    unique_id = find_active_event(event_addr, ctx, state_ts)
-                    if unique_id:
-                        events[unique_id]['states'].append({
-                            'timestamp': state_ts,
-                            'state_name': state_info['state_name'],
-                            'state_id': state_info['state_id'],
-                            'tid': state_info.get('tid'),  # Thread ID that recorded the state
-                            'pid': state_info.get('pid'),  # Process ID that recorded the state
-                            'details': state_info['details']
-                        })
-                        if events[unique_id]['func'] is None:
-                            events[unique_id]['func'] = state_info.get('func')
-                        if events[unique_id].get('type_name') is None:
-                            events[unique_id]['type_name'] = state_info.get('type_name')
-                    else:
-                        # No active event found - create a new one with just this state
-                        # Use state_ts as the unique identifier component
-                        # Use device_id from event if available, otherwise from header
-                        event_device_id = state_info.get('device_id') if state_info.get('device_id') is not None else device_id
-                        unique_id = make_unique_id(event_addr, state_ts)
-                        events[unique_id] = {
-                            'start': None,
-                            'stop': None,
-                            'states': [{
-                                'timestamp': state_ts,
-                                'state_name': state_info['state_name'],
-                                'state_id': state_info['state_id'],
-                                'tid': state_info.get('tid'),  # Thread ID that recorded the state
-                                'pid': state_info.get('pid'),  # Process ID that recorded the state
-                                'details': state_info['details']
-                            }],
-                            'type': simplify_type_name(state_info.get('type_name', '')),
-                            'type_name': state_info.get('type_name'),
-                            'func': state_info.get('func'),
-                            'start_tid': None,
-                            'start_pid': None,
-                            'stop_tid': None,
-                            'stop_pid': None,
-                            'details': {},
-                            'ctx': ctx,
-                            'rank': rank,
-                            'commid': commid,  # Communicator ID from filename
-                            'device_id': event_device_id,  # Physical GPU device ID
-                            'event_addr': event_addr
-                        }
-                        # Track as active
-                        active_events_by_addr[(event_addr, ctx)].append((unique_id, state_ts))
+    # Parse events using unified function
+    events = _parse_events_from_file(filepath, is_pxn=False, rank=rank, pid=None, 
+                                     commid=commid, device_id=device_id)
     
     # Parse footer for finalize info
     footer = parse_log_footer(filepath)
@@ -598,11 +720,99 @@ def parse_log_file(filepath: Path) -> Tuple[int, str, Dict]:
     
     return rank, commid, events
 
+
+def parse_pxn_log_header(filepath: Path) -> Dict:
+    """Parse the header section of a PXN log file to extract metadata."""
+    header_info = {
+        'commid': None,
+        'start_time': None,
+    }
+    
+    with open(filepath, 'r') as f:
+        for line in f:
+            # Stop parsing header once we see event lines
+            if line.startswith('[') and ('START' in line or 'STOP' in line or 'STATE' in line):
+                break
+            
+            # Parse CommId from header
+            commid_match = re.search(r'CommId:\s*(\d+)', line)
+            if commid_match:
+                header_info['commid'] = commid_match.group(1)
+            
+            # Parse start time
+            start_time_match = re.search(r'Start time:\s*([\d.]+)', line)
+            if start_time_match:
+                header_info['start_time'] = float(start_time_match.group(1))
+    
+    return header_info
+
+def parse_pxn_log_file(filepath: Path) -> Tuple[Optional[int], Optional[str], Dict]:
+    """Parse a PXN log file and return pid, commId, and events.
+    
+    PXN events don't have rank/ctx initially - they will be inferred later.
+    """
+    # Parse header for commId
+    header = parse_pxn_log_header(filepath)
+    
+    # Extract PID and commId from filename
+    pid = parse_pid_from_pxn_filename(filepath.name)
+    commid = header.get('commid')
+    if commid is None:
+        commid = parse_commid_from_filename(filepath.name)
+    if commid is None:
+        print(f"Warning: Could not parse commId from {filepath.name}", file=sys.stderr)
+    
+    # Parse events using unified function
+    events = _parse_events_from_file(filepath, is_pxn=True, rank=None, pid=pid, 
+                                     commid=commid, device_id=None)
+    
+    return pid, commid, events
+
+def infer_rank_ctx_from_commid_pid(commid: str, pid: int, all_events: Dict) -> Tuple[Optional[int], Optional[str], List]:
+    """Infer rank and ctx from (commId, pid) by searching through regular events.
+    
+    Returns: (rank, ctx, list_of_all_matches) where rank/ctx is the most common match.
+    If multiple unique matches found, returns all of them in the list.
+    """
+    matches = []  # List of (rank, ctx) tuples found
+    
+    for unique_id, event_data in all_events.items():
+        event_commid = event_data.get('commid')
+        if event_commid != commid:
+            continue
+        
+        # Check if this event's PID matches pid
+        start_pid = event_data.get('start_pid')
+        stop_pid = event_data.get('stop_pid')
+        
+        if (start_pid is not None and start_pid == pid) or \
+           (stop_pid is not None and stop_pid == pid):
+            rank = event_data.get('rank')
+            ctx = event_data.get('ctx')
+            if rank is not None and ctx is not None:
+                matches.append((rank, ctx))
+    
+    if not matches:
+        return (None, None, [])
+    
+    # Count occurrences of each (rank, ctx) pair
+    match_counts = Counter(matches)
+    
+    # Get the most common match
+    most_common = match_counts.most_common(1)[0]
+    rank, ctx = most_common[0]
+    
+    # Get all unique matches for logging
+    unique_matches = list(set(matches))
+    
+    return (rank, ctx, unique_matches)
+
 def parse_all_logs(dump_dir: Path) -> Dict:
     """Parse all log files in the dump directory."""
-    log_files = sorted(dump_dir.glob('minimal_profiler_rank*.log'))
+    regular_log_files = sorted(dump_dir.glob('minimal_profiler_rank*.log'))
+    pxn_log_files = sorted(dump_dir.glob('minimal_profiler_pxn_events_pid*.log'))
     
-    if not log_files:
+    if not regular_log_files and not pxn_log_files:
         print(f"Error: No log files found in {dump_dir}", file=sys.stderr)
         return {}
     
@@ -612,6 +822,7 @@ def parse_all_logs(dump_dir: Path) -> Dict:
     threads = set()  # Track unique thread IDs
     pids = set()  # Track unique process IDs
     commids = set()  # Track unique communicator IDs
+    device_ids = set()  # Track unique GPU device IDs
     
     # Build parent-child relationship map
     # Maps parent_obj address -> list of child event unique_ids
@@ -619,8 +830,8 @@ def parse_all_logs(dump_dir: Path) -> Dict:
     # Maps event unique_id -> parent event unique_id
     event_to_parent = {}
     
-    # Build events and parent-child relationships (no normalization - timestamps are kept as-is)
-    for log_file in log_files:
+    # First, parse all regular log files
+    for log_file in regular_log_files:
         rank, commid, events = parse_log_file(log_file)
         
         # Collect rank and commid from parsed files
@@ -659,6 +870,70 @@ def parse_all_logs(dump_dir: Path) -> Dict:
             for state in event_data.get('states', []):
                 if state.get('pid') is not None:
                     pids.add(state['pid'])
+            
+            # Collect device IDs
+            if event_data.get('device_id') is not None:
+                device_ids.add(event_data['device_id'])
+    
+    pxn_total_events = 0
+    pxn_events_inferred = 0
+    pxn_events_not_found = 0
+    for pxn_log_file in pxn_log_files:
+        pid, commid, pxn_events = parse_pxn_log_file(pxn_log_file)
+        
+        if commid is not None and commid != "unknown":
+            commids.add(commid)
+        
+        for unique_id, event_data in pxn_events.items():
+            pxn_total_events += 1
+            # Infer rank and ctx from (commId, pid)
+            # Use pid from the PXN event (start_pid or stop_pid) to match against regular events
+            pid = event_data.get('start_pid') or event_data.get('stop_pid')
+            if pid is not None and commid is not None:
+                rank, ctx, all_matches = infer_rank_ctx_from_commid_pid(commid, pid, all_events)
+                
+                if len(all_matches) > 1:
+                    # Multiple matches found - print warning
+                    print(f"Warning: Multiple (rank, ctx) matches for PXN event (commId={commid}, pid={pid}): {all_matches}", file=sys.stderr)
+                
+                if rank is not None and ctx is not None:
+                    event_data['rank'] = rank
+                    event_data['ctx'] = ctx
+                    pxn_events_inferred += 1
+                    ranks.add(rank)
+                    contexts.add(ctx)
+                else:
+                    pxn_events_not_found += 1
+            
+            # Add PXN event to all_events
+            all_events[unique_id] = event_data
+            
+            # Collect commid from event data
+            if event_data.get('commid') and event_data['commid'] != "unknown":
+                commids.add(event_data['commid'])
+            
+            # Collect thread IDs
+            if event_data.get('start_tid') is not None:
+                threads.add(event_data['start_tid'])
+            if event_data.get('stop_tid') is not None:
+                threads.add(event_data['stop_tid'])
+            for state in event_data.get('states', []):
+                if state.get('tid') is not None:
+                    threads.add(state['tid'])
+            
+            # Collect process IDs
+            if event_data.get('start_pid') is not None:
+                pids.add(event_data['start_pid'])
+            if event_data.get('stop_pid') is not None:
+                pids.add(event_data['stop_pid'])
+            if event_data.get('origin_pid') is not None:
+                pids.add(event_data['origin_pid'])
+            for state in event_data.get('states', []):
+                if state.get('pid') is not None:
+                    pids.add(state['pid'])
+    
+    if pxn_events_inferred > 0 or pxn_events_not_found > 0:
+        print(f"PXN events: {pxn_events_inferred} inferred rank/ctx, {pxn_events_not_found} not found", file=sys.stderr)
     
     # Build parent-child relationships after all events are parsed
     # Important: Parent and child events are ALWAYS on the same rank (memory addresses are node-local)
@@ -722,8 +997,11 @@ def parse_all_logs(dump_dir: Path) -> Dict:
         'contexts': sorted(contexts),
         'threads': sorted(threads),  # Unique thread IDs found in the logs
         'pids': sorted(pids),  # Unique process IDs found in the logs
+        'device_ids': sorted(device_ids),  # Unique GPU device IDs found in the logs
         'commids': sorted(commids),  # Unique communicator IDs found in the logs
         'total_events': len(all_events),
+        'pxn_events_inferred': pxn_events_inferred,
+        'pxn_events_not_found': pxn_events_not_found,
         'parent_child_map': parent_child_map,  # parent_id -> [child_ids]
         'event_to_parent': event_to_parent      # child_id -> parent_id
     }
@@ -774,7 +1052,12 @@ def convert_to_chrome_tracing(data: Dict) -> List[Dict]:
     for unique_id, event in data.get('events', {}).items():
         rank = event.get('rank')
         ctx = event.get('ctx')
-        tid = rank if rank is not None else 0
+        # For PXN events without inferred rank, use a special value or originPid
+        if rank is None and event.get('origin_pid') is not None:
+            # Use originPid as a fallback for visualization (will show as negative rank)
+            tid = -abs(event.get('origin_pid')) % 1000  # Keep it reasonable for visualization
+        else:
+            tid = rank if rank is not None else 0
         
         event_type = event.get('type')
         func = event.get('func')
@@ -835,6 +1118,10 @@ def convert_to_chrome_tracing(data: Dict) -> List[Dict]:
             if event.get('seq_number') is not None:
                 trace_event["args"]["seq_number"] = event.get('seq_number')
             
+            # Add originPid for PXN events
+            if event.get('origin_pid') is not None:
+                trace_event["args"]["origin_pid"] = event.get('origin_pid')
+            
             # Add parent-child relationship information
             add_parent_child_info_to_trace_event(trace_event, unique_id, data)
             
@@ -874,6 +1161,10 @@ def convert_to_chrome_tracing(data: Dict) -> List[Dict]:
             if event.get('seq_number') is not None:
                 trace_event["args"]["seq_number"] = event.get('seq_number')
             
+            # Add originPid for PXN events
+            if event.get('origin_pid') is not None:
+                trace_event["args"]["origin_pid"] = event.get('origin_pid')
+            
             # Add parent-child relationship information
             add_parent_child_info_to_trace_event(trace_event, unique_id, data)
             
@@ -908,6 +1199,10 @@ def convert_to_chrome_tracing(data: Dict) -> List[Dict]:
             # Add sequence number if present
             if event.get('seq_number') is not None:
                 trace_event["args"]["seq_number"] = event.get('seq_number')
+            
+            # Add originPid for PXN events
+            if event.get('origin_pid') is not None:
+                trace_event["args"]["origin_pid"] = event.get('origin_pid')
             
             # Add parent-child relationship information
             add_parent_child_info_to_trace_event(trace_event, unique_id, data)
@@ -987,7 +1282,13 @@ def main():
     print(f"Found {len(data['contexts'])} contexts", file=sys.stderr)
     print(f"Found {len(data['threads'])} unique thread IDs: {data['threads']}", file=sys.stderr)
     print(f"Found {len(data['pids'])} unique process IDs: {data['pids']}", file=sys.stderr)
+    print(f"Found {len(data['device_ids'])} unique GPU device IDs: {data['device_ids']}", file=sys.stderr)
     print(f"Found {len(data['commids'])} communicators: {data['commids']}", file=sys.stderr)
+    if 'pxn_events_inferred' in data or 'pxn_events_not_found' in data:
+        inferred = data.get('pxn_events_inferred', 0)
+        not_found = data.get('pxn_events_not_found', 0)
+        if inferred > 0 or not_found > 0:
+            print(f"PXN events: {inferred} with inferred rank/ctx, {not_found} without match", file=sys.stderr)
     print(f"Output written to {output_file}", file=sys.stderr)
     print(f"Chrome trace written to {chrome_trace_file}", file=sys.stderr)
     print(f"  → Load in Chrome: chrome://tracing (drag & drop the file)", file=sys.stderr)

@@ -467,7 +467,7 @@ struct MyContext {
 };
 
 // ============================================================================
-// SECTION 4: PXN Detach Pool Module
+// SECTION 3: PXN Detach Pool Module
 // ============================================================================
 // When PXN (PCI x NVLink) routing is enabled, some ProxyOp events may be
 // executed by a different process than the one that originated them. The
@@ -482,6 +482,9 @@ struct MyContext {
 // this process. We store parentObj as metadata (pointer value) for tracking
 // purposes but never dereference it.
 // ============================================================================
+
+// Forward declaration for utility function used in this section
+static double getTime();
 
 // Global state for PXN detach pool (shared across all contexts in this process)
 static pthread_mutex_t processInitMutex = PTHREAD_MUTEX_INITIALIZER;
@@ -647,7 +650,7 @@ static void cleanupDetachPool() {
 }
 
 // ============================================================================
-// SECTION 2: Utility Functions
+// SECTION 4: Utility Functions
 // ============================================================================
 
 // ----------------------------------------------------------------------------
@@ -967,6 +970,7 @@ ncclResult_t myInit(void** context, uint64_t commId, int* eActivationMask,
   // Write header to log file
   pthread_mutex_lock(&ctx->logMutex);
   fprintf(ctx->logFile, "=== Profiler initialized ===\n");
+  fprintf(ctx->logFile, "Process ID (pid): %d\n", static_cast<int>(myPid));
   fprintf(ctx->logFile, "Init thread ID (tid): %d\n", tid);
   fprintf(ctx->logFile, "Start time: %.0f us\n", ctx->startTime);
   fprintf(ctx->logFile, "Dump directory: %s\n", dirname);
@@ -1210,7 +1214,7 @@ ncclResult_t myStopEvent(void* eHandle) {
   }
   
   pthread_mutex_lock(&ctx->logMutex);
-  fprintf(ctx->logFile, "[%.3f] STOP %s::%s (pid=%d, tid=%d, device=%d, duration=%.3f us, event=%p, ctx=%p)\n",
+  fprintf(ctx->logFile, "[%.3f] STOP %s::%s (pid=%d, tid=%d, gpu_uuid=%s, duration=%.3f us, event=%p, ctx=%p)\n",
           endTime,
           event->typeName ? event->typeName : "ncclProfileUnknown",
           event->func ? event->func : "Unknown",
