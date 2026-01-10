@@ -31,6 +31,7 @@
    - 6.2 PXN Log File
    - 6.3 Log Entry Format
    - 6.4 Directory Naming
+   - 6.5 Shared JSONL Trace File
 
 ### 7. Thread Safety
    - 7.1 NCCL's Threading Model
@@ -798,6 +799,109 @@ Log files are written to a dump directory. The directory name is determined by:
 
 The directory is created if it doesn't exist (`mkdir` with mode 0755). The creation is safe to call multiple times (checks for existence first).
 
+### 6.5 Shared JSONL Trace File
+
+In addition to the human-readable text log files, the profiler writes structured trace data to a single shared JSON Lines (JSONL/NDJSON) file. This file contains **complete events** from all ranks in a machine-readable format suitable for automated analysis and visualization.
+
+**Key Design: Complete Events**
+
+Unlike the text log files which write separate START/STATE/STOP entries as they occur, the JSONL trace file outputs **complete events** only when an event finishes (at STOP time). Each JSON line contains:
+- Start timestamp and thread info
+- Stop timestamp and thread info  
+- Computed duration
+- All state transitions that occurred during the event's lifetime
+- Type-specific details captured at start time
+
+This design eliminates the need for post-processing to match START/STOP pairs and ensures each JSON line is self-contained.
+
+**File Name Format:**
+```
+{dump_dir}/trace_{SLURM_JOB_ID}.jsonl
+```
+or (if not running under SLURM):
+```
+{dump_dir}/trace_{unix_timestamp}.jsonl
+```
+
+**Writing Strategy:**
+
+All ranks within a distributed job write to the same file using POSIX append mode (`O_APPEND`). This leverages the POSIX guarantee that writes opened with `O_APPEND` are atomic for sizes up to `PIPE_BUF` (typically 4096 bytes on Linux). Each JSON line is written atomically with a single `fprintf` + `fflush` operation, protected by a process-wide mutex (`jsonlFileMutex`).
+
+**JSON Line Structure:**
+
+Each line is a self-contained JSON object representing a complete event:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | string | Event type name (e.g., `"ncclProfileColl"`, `"ProfilerLifecycle"`) |
+| `func` | string | Function/operation name (e.g., `"AllReduce"`, `"ProfilerInit"`) |
+| `gpuUuid` | string | Physical GPU UUID (empty for PXN events) |
+| `commId` | number | NCCL communicator ID (0 for PXN events) |
+| `rank` | number | Rank within communicator (-1 for PXN events) |
+| `start` | object | Start info: `{ts, pid, tid}` |
+| `stop` | object | Stop info: `{ts, pid, tid}` |
+| `duration` | number | Duration in microseconds |
+| `myPid` | number | Process ID where event was recorded |
+| `originPid` | number | For PXN events: originating process ID |
+| `parentObj` | string | Parent object pointer (hex) |
+| `eventAddr` | string | Event structure pointer (hex) |
+| `ctx` | string | Context pointer (hex, absent for PXN events) |
+| `isPxn` | boolean | True if this is a cross-process PXN event |
+| `states` | array | Array of state transitions (see below) |
+| `details` | object | Type-specific event details |
+
+**State Transition Object:**
+
+Each element in the `states` array has:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ts` | number | Timestamp of state transition (microseconds) |
+| `name` | string | State name (e.g., `"ProxyOpInProgress"`) |
+| `id` | number | Numeric state ID |
+| `pid` | number | Process ID when state was recorded |
+| `tid` | number | Thread ID when state was recorded |
+| Additional fields | varies | State-specific details (e.g., `transSize`) |
+
+**Example Complete Event (normal):**
+
+```json
+{"type":"ncclProfileColl","func":"AllReduce","gpuUuid":"GPU-12345678-1234","commId":9876543210,"rank":0,"start":{"ts":1234.567,"pid":12345,"tid":12346},"stop":{"ts":1456.789,"pid":12345,"tid":12346},"duration":222.222,"myPid":12345,"parentObj":"0x7f1234567890","eventAddr":"0x7f9876543210","ctx":"0x7fabcdef0123","states":[{"ts":1300.000,"name":"CollProgress","id":5,"pid":12345,"tid":12347}],"details":{"func":"AllReduce","seq":1,"algo":"Ring","proto":"Simple","channels":8}}
+```
+
+**Example Complete Event (PXN):**
+
+```json
+{"type":"ncclProfileProxyOp","func":"ProxyOp","start":{"ts":100.000,"pid":12345,"tid":12346},"stop":{"ts":200.000,"pid":12345,"tid":12346},"duration":100.000,"myPid":12345,"originPid":12300,"parentObj":"0x7f1234567890","eventAddr":"0x7f9876543210","isPxn":true,"states":[{"ts":150.000,"name":"ProxyOpInProgress","id":6,"pid":12345,"tid":12347}],"details":{"channel":0,"peer":1,"steps":8,"chunkSize":524288,"isSend":true,"eventPid":12300}}
+```
+
+Note that PXN events do not include `gpuUuid`, `commId`, `rank`, or `ctx` fields since the originating context is in a different process's address space and cannot be safely accessed.
+
+**ProfilerLifecycle Pseudo-Events:**
+
+The profiler writes special pseudo-events at initialization and finalization to mark the profiler's lifecycle:
+
+```json
+{"type":"ProfilerLifecycle","func":"ProfilerInit","gpuUuid":"GPU-12345678-1234","commId":9876543210,"rank":0,"start":{"ts":0.000,"pid":12345,"tid":12345},"stop":{"ts":0.000,"pid":12345,"tid":12345},"duration":0.0,"myPid":12345,"states":[],"details":{"nranks":4,"commName":"comm0","eventMask":4095,"cudaDev":0}}
+```
+
+```json
+{"type":"ProfilerLifecycle","func":"ProfilerFinalize","gpuUuid":"GPU-12345678-1234","commId":9876543210,"rank":0,"start":{"ts":5000000.000,"pid":12345,"tid":12345},"stop":{"ts":5000000.000,"pid":12345,"tid":12345},"duration":0.0,"myPid":12345,"states":[],"details":{"totalDuration":5000000.000,"poolChunks":2,"poolSlots":2048,"blacklistSize":150}}
+```
+
+These pseudo-events have zero duration and empty states arrays, serving as markers for when profiling started and ended for each rank.
+
+**Thread Safety:**
+
+The shared JSONL file uses a global mutex (`jsonlFileMutex`) to ensure atomic writes. Within a single process with multiple ranks, this mutex serializes writes. Across processes, the file is opened in append mode which provides POSIX-guaranteed atomicity for complete lines.
+
+**Use Cases:**
+
+1. **Automated Analysis**: Parse the JSONL file with standard JSON parsers in Python, JavaScript, etc.
+2. **Performance Visualization**: Convert to Chrome Trace format for visualization in Perfetto or chrome://tracing
+3. **Distributed Trace Correlation**: Match events across ranks using `parentObj` and `eventAddr` pointers
+4. **Statistical Analysis**: Extract timing distributions, identify bottlenecks, compute overlap
+
 ---
 
 ## 7. Thread Safety
@@ -824,6 +928,7 @@ The profiler uses six mutexes to protect shared resources:
 | `allocMutex` | Per-context (`MyContext`) | Pool allocation/free and blacklist operations |
 | `detachMutex` | Process-wide (static) | Detach pool and detach blacklist |
 | `detachLogMutex` | Process-wide (static) | PXN log file I/O |
+| `jsonlFileMutex` | Process-wide (static) | Shared JSONL trace file I/O |
 | `processInitMutex` | Process-wide (static) | `processInitCount`, detach pool init/cleanup |
 | `contextRegistryMutex` | Process-wide (static) | Context registry hash map |
 
@@ -861,7 +966,7 @@ To prevent deadlocks, locks are acquired in a consistent order when multiple loc
 1. `processInitMutex` (outermost - protects initialization/cleanup)
 2. `contextRegistryMutex` (context validation)
 3. `allocMutex` or `detachMutex` (resource allocation)
-4. `logMutex` or `detachLogMutex` (innermost - I/O operations)
+4. `logMutex`, `detachLogMutex`, or `jsonlFileMutex` (innermost - I/O operations)
 
 In practice, most operations only need one or two locks. The ordering matters primarily during initialization and finalization when multiple resources are accessed.
 
@@ -917,12 +1022,28 @@ struct Blacklist {
 - `evictLRU(logFile)`: Remove head node (O(1))
 - `moveToTail(node)`: Internal helper to update LRU position (O(1))
 
+#### StateTransition
+
+Stores a single state transition during an event's lifecycle (for JSONL output).
+
+```cpp
+struct StateTransition {
+  double timestamp;              // When the state transition occurred (microseconds)
+  const char* stateName;         // Human-readable state name
+  int stateId;                   // Numeric state ID
+  pid_t tid;                     // Thread ID when state was recorded
+  pid_t pid;                     // Process ID when state was recorded
+  char details[STATE_DETAILS_MAX]; // State-specific details as JSON fragment
+};
+```
+
 #### MyEvent
 
-Stores metadata for a single profiled event.
+Stores metadata for a single profiled event, including buffered state transitions for JSONL output.
 
 ```cpp
 struct MyEvent {
+  // Basic event info (set at START)
   uint64_t type;          // Event type enum value
   double startTime;       // When the event started (microseconds)
   const char* func;       // Function/operation name (e.g., "AllReduce")
@@ -932,14 +1053,31 @@ struct MyEvent {
   bool fromPool;          // True if from pool, false if dynamically allocated
   bool fromDetachPool;    // True if from process-wide detach pool
   pid_t originPid;        // PID that originated this event (for PXN tracking)
+  
+  // Start event details (captured at START for JSONL output)
+  pid_t startTid;                        // Thread ID at start
+  pid_t startPid;                        // Process ID at start
+  char startDetails[START_DETAILS_MAX];  // Type-specific details JSON from START
+  
+  // Context-dependent fields captured at START (safe for PXN - copied, not pointer)
+  char gpuUuid[64];       // GPU UUID (empty for PXN events)
+  uint64_t commId;        // Communicator ID (0 for PXN events)
+  int rank;               // Rank (-1 for PXN events)
+  
+  // State transitions buffer (accumulated during event lifetime)
+  StateTransition states[MAX_STATES_PER_EVENT];
+  int stateCount;         // Number of states recorded so far
 };
 ```
 
 **Lifecycle:**
 1. Allocated by `EventPool::allocate()` or `allocateFromDetachPool()`
-2. Fields populated in `myStartEvent()`
-3. Read in `myRecordEventState()` and `myStopEvent()`
-4. Freed by `EventPool::free()` or `freeToDetachPool()`
+2. Basic fields populated in `myStartEvent()`, including `startDetails` JSON and context-dependent fields
+3. State transitions accumulated in `myRecordEventState()` (appended to `states` array)
+4. Complete event written to JSONL in `myStopEvent()` (all buffered data included)
+5. Freed by `EventPool::free()` or `freeToDetachPool()`
+
+**Note on PXN Safety:** The `gpuUuid`, `commId`, and `rank` fields are copied from the context at START time (for normal events) or set to empty/default values (for PXN events). This ensures these values are safe to access at STOP time even for PXN events where the original context pointer is invalid.
 
 #### EventPool
 
@@ -1155,6 +1293,10 @@ ncclProfileGroupApi
 | `INITIAL_POOL_SIZE` | 1024 | Initial slots per per-context pool chunk |
 | `INITIAL_DETACH_POOL_SIZE` | 256 | Initial slots per detach pool chunk |
 | `BLACKLIST_CAP` | 10,000,000 | Maximum entries in any blacklist |
+| `JSONL_LINE_MAX` | 4000 | Maximum length of a single JSONL line (under 4KB for atomicity) |
+| `MAX_STATES_PER_EVENT` | 64 | Maximum state transitions buffered per event |
+| `STATE_DETAILS_MAX` | 128 | Maximum size for state-specific details JSON fragment |
+| `START_DETAILS_MAX` | 2048 | Maximum size for start event details JSON fragment |
 
 **Configuration Value Trade-offs:**
 

@@ -60,6 +60,12 @@ static const size_t BLACKLIST_CAP = 10000000;           // 10 million entries ma
 // Environment variable names
 static const char* ENV_EVENT_MASK = "NCCL_PROFILE_EVENT_MASK";
 
+// JSONL tracing configuration
+static const size_t JSONL_LINE_MAX = 4000;             // Max line size (under 4KB for POSIX atomicity)
+static const size_t MAX_STATES_PER_EVENT = 64;         // Max state transitions per event
+static const size_t STATE_DETAILS_MAX = 128;           // Max size for state-specific details JSON
+static const size_t START_DETAILS_MAX = 2048;          // Max size for start event details JSON
+
 // ============================================================================
 // SECTION 2: Data Structures
 // ============================================================================
@@ -219,9 +225,23 @@ struct Blacklist {
 };
 
 // ----------------------------------------------------------------------------
+// StateTransition: Stores a single state transition during an event's lifecycle
+// ----------------------------------------------------------------------------
+struct StateTransition {
+  double timestamp;
+  const char* stateName;
+  int stateId;
+  pid_t tid;
+  pid_t pid;
+  char details[STATE_DETAILS_MAX];  // State-specific details as JSON fragment
+};
+
+// ----------------------------------------------------------------------------
 // MyEvent: Stores event data + parent reference for cleanup
+// Extended to support buffering complete events for JSONL output
 // ----------------------------------------------------------------------------
 struct MyEvent {
+  // Basic event info (set at START)
   uint64_t type;
   double startTime;
   const char* func;
@@ -231,6 +251,20 @@ struct MyEvent {
   bool fromPool;          // Indicates whether this event was allocated from pool or dynamically
   bool fromDetachPool;    // Indicates whether this event is from detach pool (PXN event)
   pid_t originPid;        // PID of the process that originated this event (for PXN tracking)
+  
+  // Start event details (captured at START for JSONL output)
+  pid_t startTid;
+  pid_t startPid;
+  char startDetails[START_DETAILS_MAX];  // Type-specific details JSON from START
+  
+  // Context-dependent fields captured at START (safe for PXN - copied, not pointer)
+  char gpuUuid[64];       // GPU UUID (empty for PXN events)
+  uint64_t commId;        // Communicator ID (0 for PXN events)
+  int rank;               // Rank (-1 for PXN events)
+  
+  // State transitions buffer (accumulated during event lifetime)
+  StateTransition states[MAX_STATES_PER_EVENT];
+  int stateCount;
 };
 
 // ----------------------------------------------------------------------------
@@ -451,6 +485,33 @@ struct EventPool {
 // ----------------------------------------------------------------------------
 // MyContext: Per-communicator plugin state
 // ----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
+// JsonlBuffer: Thread-local buffer for batching JSONL writes
+// ----------------------------------------------------------------------------
+struct JsonlBuffer {
+  std::vector<std::string> lines;       // Buffered JSON lines
+  size_t capacity;                       // Max lines before flush
+  
+  JsonlBuffer() : capacity(JSONL_BUFFER_SIZE) {
+    lines.reserve(capacity);
+  }
+  
+  bool shouldFlush() const {
+    return lines.size() >= capacity;
+  }
+  
+  void addLine(const std::string& line) {
+    lines.push_back(line);
+  }
+  
+  void clear() {
+    lines.clear();
+  }
+};
+
+// ----------------------------------------------------------------------------
+// MyContext: Per-communicator plugin state
+// ----------------------------------------------------------------------------
 struct MyContext {
   FILE* logFile;
   pthread_mutex_t logMutex;     // Protects logFile I/O
@@ -464,6 +525,9 @@ struct MyContext {
   
   EventPool pool;
   Blacklist blacklist;
+  
+  // JSONL buffering (per-context buffer, flushed to shared file)
+  JsonlBuffer jsonlBuffer;
 };
 
 // ============================================================================
@@ -497,6 +561,11 @@ static pthread_mutex_t detachMutex = PTHREAD_MUTEX_INITIALIZER;  // Protects det
 static FILE* detachLogFile = nullptr;        // Process-wide log file for PXN events
 static pthread_mutex_t detachLogMutex = PTHREAD_MUTEX_INITIALIZER;  // Protects detach log file
 static double detachStartTime = 0;           // Start time for PXN event timestamps
+
+// Global shared JSONL trace file (all ranks write to same file using O_APPEND)
+static FILE* sharedJsonlFile = nullptr;      // Shared trace file (opened with append mode)
+static pthread_mutex_t jsonlFileMutex = PTHREAD_MUTEX_INITIALIZER;  // Protects sharedJsonlFile writes
+static char sharedJsonlPath[512] = {0};      // Path to shared JSONL file
 
 // Context registry: tracks all valid context pointers created by this process
 // When PXN routing is enabled, NCCL may pass context pointers from other processes
@@ -633,6 +702,10 @@ static void cleanupDetachPool() {
     detachLogFile = nullptr;
   }
   
+  // Close the shared JSONL file
+  closeSharedJsonlFile();
+  pthread_mutex_destroy(&jsonlFileMutex);
+  
   delete detachPool;
   delete detachBlacklist;
   detachPool = nullptr;
@@ -667,6 +740,111 @@ static double getTime() {
 // Get thread ID (Linux-specific)
 static inline pid_t getTid() {
   return static_cast<pid_t>(syscall(SYS_gettid));
+}
+
+// ----------------------------------------------------------------------------
+// JSON/JSONL Utility Functions
+// ----------------------------------------------------------------------------
+
+// Escape special characters in a string for JSON output
+// Returns escaped string, output must have at least 2*len+1 bytes
+static void escapeJsonString(const char* input, char* output, size_t outputSize) {
+  if (!input) {
+    output[0] = '\0';
+    return;
+  }
+  
+  size_t j = 0;
+  for (size_t i = 0; input[i] != '\0' && j < outputSize - 2; i++) {
+    char c = input[i];
+    switch (c) {
+      case '"':  if (j + 2 < outputSize) { output[j++] = '\\'; output[j++] = '"'; } break;
+      case '\\': if (j + 2 < outputSize) { output[j++] = '\\'; output[j++] = '\\'; } break;
+      case '\n': if (j + 2 < outputSize) { output[j++] = '\\'; output[j++] = 'n'; } break;
+      case '\r': if (j + 2 < outputSize) { output[j++] = '\\'; output[j++] = 'r'; } break;
+      case '\t': if (j + 2 < outputSize) { output[j++] = '\\'; output[j++] = 't'; } break;
+      default:
+        if (c >= 32 && c < 127) {  // Printable ASCII
+          output[j++] = c;
+        }
+        // Skip non-printable characters
+        break;
+    }
+  }
+  output[j] = '\0';
+}
+
+// Format a pointer as hex string (without 0x prefix for compactness)
+static void formatPointer(const void* ptr, char* output, size_t outputSize) {
+  if (ptr) {
+    snprintf(output, outputSize, "0x%lx", reinterpret_cast<unsigned long>(ptr));
+  } else {
+    snprintf(output, outputSize, "null");
+  }
+}
+
+// Write buffered JSONL lines to the shared file
+// Called with jsonlFileMutex held
+static void flushJsonlBuffer(JsonlBuffer& buffer) {
+  if (!sharedJsonlFile || buffer.lines.empty()) {
+    return;
+  }
+  
+  pthread_mutex_lock(&jsonlFileMutex);
+  for (const auto& line : buffer.lines) {
+    fprintf(sharedJsonlFile, "%s\n", line.c_str());
+  }
+  fflush(sharedJsonlFile);
+  pthread_mutex_unlock(&jsonlFileMutex);
+  
+  buffer.clear();
+}
+
+// Write a single JSONL line directly to the shared file (no buffering)
+static void writeJsonlLineDirect(const char* line) {
+  if (!sharedJsonlFile || !line) {
+    return;
+  }
+  
+  pthread_mutex_lock(&jsonlFileMutex);
+  fprintf(sharedJsonlFile, "%s\n", line);
+  fflush(sharedJsonlFile);
+  pthread_mutex_unlock(&jsonlFileMutex);
+}
+
+// Initialize the shared JSONL trace file (called on first communicator init)
+static bool initSharedJsonlFile(const char* dirname) {
+  const char* slurm_job_id = getenv("SLURM_JOB_ID");
+  
+  if (slurm_job_id && slurm_job_id[0] != '\0') {
+    snprintf(sharedJsonlPath, sizeof(sharedJsonlPath), 
+             "%s/trace_%s.jsonl", dirname, slurm_job_id);
+  } else {
+    // Fallback to timestamp-based naming
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    snprintf(sharedJsonlPath, sizeof(sharedJsonlPath), 
+             "%s/trace_%ld.jsonl", dirname, ts.tv_sec);
+  }
+  
+  // Open in append mode (O_APPEND) - POSIX guarantees atomic appends for complete lines
+  sharedJsonlFile = fopen(sharedJsonlPath, "a");
+  if (!sharedJsonlFile) {
+    fprintf(stderr, "[MinimalProfiler] WARNING: Failed to open shared JSONL file: %s\n", sharedJsonlPath);
+    return false;
+  }
+  
+  fprintf(stderr, "[MinimalProfiler] Shared JSONL trace file: %s\n", sharedJsonlPath);
+  return true;
+}
+
+// Close the shared JSONL file (called when last communicator is finalized)
+static void closeSharedJsonlFile() {
+  if (sharedJsonlFile) {
+    fflush(sharedJsonlFile);
+    fclose(sharedJsonlFile);
+    sharedJsonlFile = nullptr;
+  }
 }
 
 // ----------------------------------------------------------------------------
@@ -789,6 +967,143 @@ static void logStartEvent(MyEvent* event, void* parentObj, const char* fmt, ...)
 }
 
 // ----------------------------------------------------------------------------
+// JSONL Complete Event Writer
+// Writes a single complete event with all accumulated states (called at STOP)
+// ----------------------------------------------------------------------------
+
+static void writeJsonlCompleteEvent(MyEvent* event, double endTime, double duration, pid_t stopTid) {
+  if (!event || !sharedJsonlFile) return;
+  
+  // Build the complete event JSON
+  // Format: {"type":"...", "func":"...", "start":{...}, "stop":{...}, "states":[...], "details":{...}}
+  
+  char line[JSONL_LINE_MAX];
+  char parentObjStr[32], eventAddrStr[32], ctxStr[32];
+  char escapedFunc[256], escapedType[256], escapedGpuUuid[64];
+  
+  formatPointer(event->parentObj, parentObjStr, sizeof(parentObjStr));
+  formatPointer(static_cast<void*>(event), eventAddrStr, sizeof(eventAddrStr));
+  escapeJsonString(event->func ? event->func : "Unknown", escapedFunc, sizeof(escapedFunc));
+  escapeJsonString(event->typeName ? event->typeName : "Unknown", escapedType, sizeof(escapedType));
+  escapeJsonString(event->gpuUuid[0] != '\0' ? event->gpuUuid : "", escapedGpuUuid, sizeof(escapedGpuUuid));
+  
+  // Build states array
+  char statesArray[2048] = "[";
+  size_t statesLen = 1;
+  for (int i = 0; i < event->stateCount && statesLen < sizeof(statesArray) - 256; i++) {
+    const StateTransition& st = event->states[i];
+    char escapedStateName[128];
+    escapeJsonString(st.stateName ? st.stateName : "Unknown", escapedStateName, sizeof(escapedStateName));
+    
+    char stateEntry[256];
+    if (st.details[0] != '\0') {
+      snprintf(stateEntry, sizeof(stateEntry),
+               "%s{\"ts\":%.3f,\"name\":\"%s\",\"id\":%d,\"pid\":%d,\"tid\":%d,%s}",
+               i > 0 ? "," : "",
+               st.timestamp, escapedStateName, st.stateId,
+               static_cast<int>(st.pid), static_cast<int>(st.tid),
+               st.details);
+    } else {
+      snprintf(stateEntry, sizeof(stateEntry),
+               "%s{\"ts\":%.3f,\"name\":\"%s\",\"id\":%d,\"pid\":%d,\"tid\":%d}",
+               i > 0 ? "," : "",
+               st.timestamp, escapedStateName, st.stateId,
+               static_cast<int>(st.pid), static_cast<int>(st.tid));
+    }
+    size_t entryLen = strlen(stateEntry);
+    if (statesLen + entryLen < sizeof(statesArray) - 2) {
+      strcpy(statesArray + statesLen, stateEntry);
+      statesLen += entryLen;
+    }
+  }
+  statesArray[statesLen] = ']';
+  statesArray[statesLen + 1] = '\0';
+  
+  if (event->fromDetachPool) {
+    // PXN event - no gpuUuid, commId, rank, ctx
+    snprintf(line, sizeof(line),
+             "{\"type\":\"%s\",\"func\":\"%s\","
+             "\"start\":{\"ts\":%.3f,\"pid\":%d,\"tid\":%d},"
+             "\"stop\":{\"ts\":%.3f,\"pid\":%d,\"tid\":%d},"
+             "\"duration\":%.3f,"
+             "\"myPid\":%d,\"originPid\":%d,"
+             "\"parentObj\":\"%s\",\"eventAddr\":\"%s\","
+             "\"isPxn\":true,"
+             "\"states\":%s,"
+             "\"details\":{%s}}",
+             escapedType, escapedFunc,
+             event->startTime, static_cast<int>(event->startPid), static_cast<int>(event->startTid),
+             endTime, static_cast<int>(getpid()), static_cast<int>(stopTid),
+             duration,
+             static_cast<int>(myPid), static_cast<int>(event->originPid),
+             parentObjStr, eventAddrStr,
+             statesArray,
+             event->startDetails);
+  } else {
+    // Normal event - include all fields
+    MyContext* ctx = event->ctx;
+    formatPointer(static_cast<void*>(ctx), ctxStr, sizeof(ctxStr));
+    
+    snprintf(line, sizeof(line),
+             "{\"type\":\"%s\",\"func\":\"%s\","
+             "\"gpuUuid\":\"%s\",\"commId\":%lu,\"rank\":%d,"
+             "\"start\":{\"ts\":%.3f,\"pid\":%d,\"tid\":%d},"
+             "\"stop\":{\"ts\":%.3f,\"pid\":%d,\"tid\":%d},"
+             "\"duration\":%.3f,"
+             "\"myPid\":%d,"
+             "\"parentObj\":\"%s\",\"eventAddr\":\"%s\",\"ctx\":\"%s\","
+             "\"states\":%s,"
+             "\"details\":{%s}}",
+             escapedType, escapedFunc,
+             escapedGpuUuid, event->commId, event->rank,
+             event->startTime, static_cast<int>(event->startPid), static_cast<int>(event->startTid),
+             endTime, static_cast<int>(getpid()), static_cast<int>(stopTid),
+             duration,
+             static_cast<int>(myPid),
+             parentObjStr, eventAddrStr, ctxStr,
+             statesArray,
+             event->startDetails);
+  }
+  
+  writeJsonlLineDirect(line);
+}
+
+// Write a ProfilerLifecycle pseudo-event to JSONL
+static void writeJsonlLifecycleEvent(const char* action, double timestamp, 
+                                      const char* gpuUuid, uint64_t commId, int rank,
+                                      const char* detailsJson) {
+  if (!sharedJsonlFile) return;
+  
+  char line[JSONL_LINE_MAX];
+  char escapedGpuUuid[64], escapedDetails[1024], escapedAction[32];
+  
+  escapeJsonString(gpuUuid ? gpuUuid : "", escapedGpuUuid, sizeof(escapedGpuUuid));
+  escapeJsonString(detailsJson ? detailsJson : "", escapedDetails, sizeof(escapedDetails));
+  escapeJsonString(action, escapedAction, sizeof(escapedAction));
+  
+  pid_t tid = getTid();
+  pid_t pid = getpid();
+  
+  snprintf(line, sizeof(line),
+           "{\"type\":\"ProfilerLifecycle\",\"func\":\"%s\","
+           "\"gpuUuid\":\"%s\",\"commId\":%lu,\"rank\":%d,"
+           "\"start\":{\"ts\":%.3f,\"pid\":%d,\"tid\":%d},"
+           "\"stop\":{\"ts\":%.3f,\"pid\":%d,\"tid\":%d},"
+           "\"duration\":0.0,"
+           "\"myPid\":%d,"
+           "\"states\":[],"
+           "\"details\":{%s}}",
+           escapedAction,
+           escapedGpuUuid, commId, rank,
+           timestamp, static_cast<int>(pid), static_cast<int>(tid),
+           timestamp, static_cast<int>(pid), static_cast<int>(tid),
+           static_cast<int>(myPid),
+           escapedDetails);
+  
+  writeJsonlLineDirect(line);
+}
+
+// ----------------------------------------------------------------------------
 // Type and State Name Mappers
 // ----------------------------------------------------------------------------
 
@@ -891,6 +1206,13 @@ ncclResult_t myInit(void** context, uint64_t commId, int* eActivationMask,
     } else {
       fprintf(stderr, "[MinimalProfiler] WARNING: Failed to initialize PXN log file\n");
     }
+    
+    // Initialize shared JSONL trace file (all ranks write to same file)
+    if (initSharedJsonlFile(dirname)) {
+      fprintf(stderr, "[MinimalProfiler] Shared JSONL trace file initialized\n");
+    } else {
+      fprintf(stderr, "[MinimalProfiler] WARNING: Failed to initialize shared JSONL file\n");
+    }
   }
   processInitCount++;
   pthread_mutex_unlock(&processInitMutex);
@@ -990,6 +1312,15 @@ ncclResult_t myInit(void** context, uint64_t commId, int* eActivationMask,
   // Register this context in the process-wide registry for PXN validation
   registerContext(ctx);
   
+  // Write ProfilerInit lifecycle event to JSONL
+  {
+    char detailsJson[512];
+    snprintf(detailsJson, sizeof(detailsJson),
+             "\"nranks\":%d,\"commName\":\"%s\",\"eventMask\":%d,\"cudaDev\":%d",
+             nranks, commName ? commName : "", mask, ctx->cudaDev);
+    writeJsonlLifecycleEvent("ProfilerInit", ctx->startTime, ctx->gpuUuid, commId, rank, detailsJson);
+  }
+  
   *context = ctx;
   return ncclSuccess;
 }
@@ -1049,6 +1380,15 @@ ncclResult_t myStartEvent(void* context, void** eHandle,
     event->parentObj = eDescr->parentObj;
     event->originPid = eventPid;  // Will be 0 for non-ProxyOp events
     
+    // Initialize new fields for JSONL output (PXN events have no ctx access)
+    event->startTid = getTid();
+    event->startPid = getpid();
+    event->gpuUuid[0] = '\0';  // Not available for PXN
+    event->commId = 0;          // Not available for PXN
+    event->rank = -1;           // Not available for PXN
+    event->stateCount = 0;
+    event->startDetails[0] = '\0';  // Will be populated in switch below
+    
     // Track parentObj in detach blacklist to prevent address reuse
     trackDetachParent(eDescr->parentObj, detachLogFile);
   } else {
@@ -1070,6 +1410,16 @@ ncclResult_t myStartEvent(void* context, void** eHandle,
     event->parentObj = eDescr->parentObj;
     event->fromDetachPool = false;
     event->originPid = getpid();
+    
+    // Initialize new fields for JSONL output - capture ctx-dependent fields NOW
+    event->startTid = getTid();
+    event->startPid = getpid();
+    strncpy(event->gpuUuid, ctx->gpuUuid, sizeof(event->gpuUuid) - 1);
+    event->gpuUuid[sizeof(event->gpuUuid) - 1] = '\0';
+    event->commId = ctx->commId;
+    event->rank = ctx->rank;
+    event->stateCount = 0;
+    event->startDetails[0] = '\0';  // Will be populated in switch below
     
     // Handle parent reference (add to blacklist) - only for local events
     if (eDescr->parentObj) {
@@ -1164,6 +1514,88 @@ ncclResult_t myStartEvent(void* context, void** eHandle,
       break;
   }
   
+  // Build startDetails JSON for later JSONL output (stored in event, written on STOP)
+  {
+    char streamStr[32], sendBuffStr[32], recvBuffStr[32], buffStr[32], parentGroupStr[32], dataStr[32];
+    
+    switch (eDescr->type) {
+      case ncclProfileGroupApi:
+        snprintf(event->startDetails, sizeof(event->startDetails), 
+                 "\"depth\":%d,\"graphCaptured\":%s",
+                 eDescr->groupApi.groupDepth, eDescr->groupApi.graphCaptured ? "true" : "false");
+        break;
+      case ncclProfileCollApi:
+        formatPointer(eDescr->collApi.stream, streamStr, sizeof(streamStr));
+        snprintf(event->startDetails, sizeof(event->startDetails),
+                 "\"func\":\"%s\",\"count\":%zu,\"dtype\":\"%s\",\"root\":%d,\"stream\":\"%s\",\"graphCaptured\":%s",
+                 eDescr->collApi.func, eDescr->collApi.count, eDescr->collApi.datatype,
+                 eDescr->collApi.root, streamStr, eDescr->collApi.graphCaptured ? "true" : "false");
+        break;
+      case ncclProfileP2pApi:
+        formatPointer(eDescr->p2pApi.stream, streamStr, sizeof(streamStr));
+        snprintf(event->startDetails, sizeof(event->startDetails),
+                 "\"func\":\"%s\",\"count\":%zu,\"dtype\":\"%s\",\"stream\":\"%s\",\"graphCaptured\":%s",
+                 eDescr->p2pApi.func, eDescr->p2pApi.count, eDescr->p2pApi.datatype,
+                 streamStr, eDescr->p2pApi.graphCaptured ? "true" : "false");
+        break;
+      case ncclProfileKernelLaunch:
+        formatPointer(eDescr->kernelLaunch.stream, streamStr, sizeof(streamStr));
+        snprintf(event->startDetails, sizeof(event->startDetails), "\"stream\":\"%s\"", streamStr);
+        break;
+      case ncclProfileColl:
+        formatPointer(eDescr->coll.sendBuff, sendBuffStr, sizeof(sendBuffStr));
+        formatPointer(eDescr->coll.recvBuff, recvBuffStr, sizeof(recvBuffStr));
+        formatPointer(eDescr->coll.parentGroup, parentGroupStr, sizeof(parentGroupStr));
+        snprintf(event->startDetails, sizeof(event->startDetails),
+                 "\"func\":\"%s\",\"seq\":%lu,\"algo\":\"%s\",\"proto\":\"%s\",\"channels\":%d,"
+                 "\"warps\":%d,\"count\":%zu,\"root\":%d,\"dtype\":\"%s\","
+                 "\"sendBuff\":\"%s\",\"recvBuff\":\"%s\",\"parentGroup\":\"%s\"",
+                 eDescr->coll.func, eDescr->coll.seqNumber, eDescr->coll.algo, eDescr->coll.proto,
+                 eDescr->coll.nChannels, eDescr->coll.nWarps, eDescr->coll.count, eDescr->coll.root,
+                 eDescr->coll.datatype, sendBuffStr, recvBuffStr, parentGroupStr);
+        break;
+      case ncclProfileP2p:
+        formatPointer(eDescr->p2p.buff, buffStr, sizeof(buffStr));
+        formatPointer(eDescr->p2p.parentGroup, parentGroupStr, sizeof(parentGroupStr));
+        snprintf(event->startDetails, sizeof(event->startDetails),
+                 "\"func\":\"%s\",\"peer\":%d,\"channels\":%d,\"count\":%zu,\"dtype\":\"%s\","
+                 "\"buff\":\"%s\",\"parentGroup\":\"%s\"",
+                 eDescr->p2p.func, eDescr->p2p.peer, eDescr->p2p.nChannels, eDescr->p2p.count,
+                 eDescr->p2p.datatype, buffStr, parentGroupStr);
+        break;
+      case ncclProfileProxyOp:
+        snprintf(event->startDetails, sizeof(event->startDetails),
+                 "\"channel\":%d,\"peer\":%d,\"steps\":%d,\"chunkSize\":%d,\"isSend\":%s,\"eventPid\":%d",
+                 eDescr->proxyOp.channelId, eDescr->proxyOp.peer, eDescr->proxyOp.nSteps,
+                 eDescr->proxyOp.chunkSize, eDescr->proxyOp.isSend ? "true" : "false",
+                 static_cast<int>(eDescr->proxyOp.pid));
+        break;
+      case ncclProfileProxyStep:
+        snprintf(event->startDetails, sizeof(event->startDetails), "\"step\":%d", eDescr->proxyStep.step);
+        break;
+      case ncclProfileProxyCtrl:
+        // No extra details
+        break;
+      case ncclProfileKernelCh:
+        snprintf(event->startDetails, sizeof(event->startDetails),
+                 "\"channel\":%d,\"pTimer\":%lu", eDescr->kernelCh.channelId, eDescr->kernelCh.pTimer);
+        break;
+      case ncclProfileNetPlugin:
+        formatPointer(eDescr->netPlugin.data, dataStr, sizeof(dataStr));
+        snprintf(event->startDetails, sizeof(event->startDetails),
+                 "\"id\":%ld,\"data\":\"%s\"", static_cast<long>(eDescr->netPlugin.id), dataStr);
+        break;
+      case ncclProfileGroup:
+        // No extra details
+        break;
+      default:
+        snprintf(event->startDetails, sizeof(event->startDetails), "\"rawType\":\"0x%lx\"", 
+                 static_cast<unsigned long>(eDescr->type));
+        break;
+    }
+  }
+  // Note: JSONL output is now written in myStopEvent as a complete event
+  
   *eHandle = event;
   return ncclSuccess;
 }
@@ -1201,6 +1633,9 @@ ncclResult_t myStopEvent(void* eHandle) {
       pthread_mutex_unlock(&detachLogMutex);
     }
     
+    // Write complete JSONL event (PXN)
+    writeJsonlCompleteEvent(event, endTime, duration, tid);
+    
     // Release parent reference and free to detach pool
     releaseDetachParent(event->parentObj);
     freeToDetachPool(event);
@@ -1225,6 +1660,9 @@ ncclResult_t myStopEvent(void* eHandle) {
           static_cast<void*>(event),
           static_cast<void*>(ctx));
   pthread_mutex_unlock(&ctx->logMutex);
+  
+  // Write complete JSONL event (normal)
+  writeJsonlCompleteEvent(event, endTime, duration, tid);
   
   // Decrement parent reference in blacklist
   if (event->parentObj) {
@@ -1294,6 +1732,30 @@ ncclResult_t myRecordEventState(void* eHandle,
       fflush(detachLogFile);
       pthread_mutex_unlock(&detachLogMutex);
     }
+    
+    // Accumulate state in event buffer (for JSONL output on STOP)
+    if (event->stateCount < MAX_STATES_PER_EVENT) {
+      StateTransition& st = event->states[event->stateCount];
+      st.timestamp = currentTime;
+      st.stateName = stateName;
+      st.stateId = static_cast<int>(eState);
+      st.tid = tid;
+      st.pid = pid;
+      st.details[0] = '\0';
+      
+      if (eStateArgs) {
+        switch (eState) {
+          case ncclProfilerProxyStepSendWait:
+          case ncclProfilerProxyStepRecvFlushWait:
+            snprintf(st.details, sizeof(st.details), "\"transSize\":%zu", eStateArgs->proxyStep.transSize);
+            break;
+          default:
+            break;
+        }
+      }
+      event->stateCount++;
+    }
+    
     return ncclSuccess;
   }
   
@@ -1337,6 +1799,40 @@ ncclResult_t myRecordEventState(void* eHandle,
   fprintf(ctx->logFile, ", event=%p, ctx=%p)\n", static_cast<void*>(event), static_cast<void*>(ctx));
   pthread_mutex_unlock(&ctx->logMutex);
   
+  // Accumulate state in event buffer (for JSONL output on STOP)
+  if (event->stateCount < MAX_STATES_PER_EVENT) {
+    StateTransition& st = event->states[event->stateCount];
+    st.timestamp = currentTime;
+    st.stateName = stateName;
+    st.stateId = static_cast<int>(eState);
+    st.tid = tid;
+    st.pid = pid;
+    st.details[0] = '\0';
+    
+    char dataStr[32];
+    if (eStateArgs) {
+      switch (eState) {
+        case ncclProfilerProxyStepSendWait:
+        case ncclProfilerProxyStepRecvFlushWait:
+          snprintf(st.details, sizeof(st.details), "\"transSize\":%zu", eStateArgs->proxyStep.transSize);
+          break;
+        case ncclProfilerProxyCtrlAppendEnd:
+          snprintf(st.details, sizeof(st.details), "\"appendedProxyOps\":%d", eStateArgs->proxyCtrl.appendedProxyOps);
+          break;
+        case ncclProfilerKernelChStop:
+          snprintf(st.details, sizeof(st.details), "\"pTimer\":%lu", eStateArgs->kernelCh.pTimer);
+          break;
+        case ncclProfilerNetPluginUpdate:
+          formatPointer(eStateArgs->netPlugin.data, dataStr, sizeof(dataStr));
+          snprintf(st.details, sizeof(st.details), "\"data\":\"%s\"", dataStr);
+          break;
+        default:
+          break;
+      }
+    }
+    event->stateCount++;
+  }
+  
   return ncclSuccess;
 }
 
@@ -1346,6 +1842,18 @@ ncclResult_t myRecordEventState(void* eHandle,
 ncclResult_t myFinalize(void* context) {
   MyContext* ctx = static_cast<MyContext*>(context);
   pid_t tid = getTid();
+  double endTime = getTime();
+  double totalDuration = endTime - ctx->startTime;
+  
+  // Write ProfilerFinalize lifecycle event to JSONL BEFORE unregistering/cleanup
+  {
+    char detailsJson[512];
+    snprintf(detailsJson, sizeof(detailsJson),
+             "\"totalDuration\":%.3f,\"poolChunks\":%zu,\"poolSlots\":%zu,\"blacklistSize\":%zu",
+             totalDuration, ctx->pool.chunks.size(), 
+             ctx->pool.chunks.size() * ctx->pool.chunkSize, ctx->blacklist.map.size());
+    writeJsonlLifecycleEvent("ProfilerFinalize", endTime, ctx->gpuUuid, ctx->commId, ctx->rank, detailsJson);
+  }
   
   // Unregister this context from the process-wide registry
   // Do this FIRST before any other cleanup to prevent race conditions
@@ -1353,8 +1861,6 @@ ncclResult_t myFinalize(void* context) {
   unregisterContext(ctx);
   
   if (ctx->logFile) {
-    double endTime = getTime();
-    double totalDuration = endTime - ctx->startTime;
     pthread_mutex_lock(&ctx->logMutex);
     fprintf(ctx->logFile, "[%.3f] === Profiler finalized (tid=%d, totalDuration=%.3f us = %.6f s, ctx=%p) ===\n", 
             endTime, tid, totalDuration, totalDuration / 1e6, static_cast<void*>(ctx));
