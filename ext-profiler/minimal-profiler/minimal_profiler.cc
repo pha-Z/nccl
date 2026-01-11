@@ -37,7 +37,7 @@
 #include <string>
 #include <cstring>
 
-// Include CUDA runtime for device ID queries
+// Include CUDA runtime for GPU UUID queries
 #include <cuda_runtime.h>
 
 // Include the profiler API headers (C headers)
@@ -63,9 +63,9 @@ static const size_t BLACKLIST_CAP = 10000000;           // 10 million entries ma
 static const char* ENV_EVENT_MASK = "NCCL_PROFILE_EVENT_MASK";
 
 // JSONL tracing configuration
-// Note: We use dynamic std::string and std::vector for JSON construction,
-// so there are no fixed buffer size limits. Events can have any number of
-// state transitions and any size of details.
+// Note: Each process writes to its own trace file (trace_<jobid>_proc<procid>.jsonl).
+// This avoids write interleaving issues on network filesystems (NFS, Lustre, GPFS)
+// where O_APPEND atomicity guarantees do not apply across different clients/nodes.
 
 // ============================================================================
 // SECTION 2: Data Structures
@@ -143,17 +143,15 @@ struct Blacklist {
   }
   
   // Evict LRU entry (called when at cap)
-  void evictLRU(FILE* logFile = nullptr) {
+  void evictLRU() {
     if (!head) return;
     
     BlacklistNode* node = head;
     
-    // Log warning about forced eviction
-    if (logFile) {
-      fprintf(logFile, "[WARNING] Blacklist cap reached (%zu), evicting address %p with refCount=%d. "
-              "Potential false parent-child match may occur.\n",
-              cap, node->address, node->refCount);
-    }
+    // Log warning about forced eviction to stderr
+    fprintf(stderr, "[MinimalProfiler] WARNING: Blacklist cap reached (%zu), evicting address %p with refCount=%d. "
+            "Potential false parent-child match may occur.\n",
+            cap, node->address, node->refCount);
     
     // Unlink head
     head = node->next;
@@ -169,10 +167,10 @@ struct Blacklist {
   }
   
   // Add new address to blacklist (at tail)
-  void add(void* addr, FILE* logFile = nullptr) {
+  void add(void* addr) {
     // Check if we need to evict
     if (map.size() >= cap) {
-      evictLRU(logFile);
+      evictLRU();
     }
     
     BlacklistNode* node = new BlacklistNode();
@@ -229,28 +227,12 @@ struct Blacklist {
 };
 
 // ----------------------------------------------------------------------------
-// StateTransition: Stores a single state transition during an event's lifecycle
-// Uses dynamic std::string for details - no size limit
-// ----------------------------------------------------------------------------
-struct StateTransition {
-  double timestamp;
-  std::string stateName;
-  int stateId;
-  pid_t tid;
-  pid_t pid;
-  std::string details;  // State-specific details as JSON fragment (dynamic)
-};
-
-// ----------------------------------------------------------------------------
 // MyEvent: Stores event data + parent reference for cleanup
-// Extended to support buffering complete events for JSONL output
-// Uses dynamic containers - no fixed size limits
 // ----------------------------------------------------------------------------
 struct MyEvent {
   // Basic event info (set at START)
   uint64_t type;
   double startTime;
-  const char* func;
   const char* typeName;
   MyContext* ctx;
   void* parentObj;        // Store parentObj to decrement blacklist ref on stop
@@ -267,9 +249,6 @@ struct MyEvent {
   char gpuUuid[64];       // GPU UUID (empty for PXN events)
   uint64_t commId;        // Communicator ID (0 for PXN events)
   int rank;               // Rank (-1 for PXN events)
-  
-  // State transitions (accumulated during event lifetime) - dynamic vector, no limit
-  std::vector<StateTransition> states;
 };
 
 // ----------------------------------------------------------------------------
@@ -324,7 +303,7 @@ struct EventPool {
   }
   
   // Allocate a new chunk and append it (never deletes old chunks)
-  bool grow(FILE* logFile = nullptr) {
+  bool grow() {
     // Allocate a new chunk (same size as existing chunks)
     MyEvent* newChunk = new (std::nothrow) MyEvent[chunkSize]();
     bool* newInUse = new (std::nothrow) bool[chunkSize]();
@@ -332,9 +311,7 @@ struct EventPool {
     if (!newChunk || !newInUse) {
       delete[] newChunk;
       delete[] newInUse;
-      if (logFile) {
-        fprintf(logFile, "[WARNING] Failed to allocate new chunk of size %zu\n", chunkSize);
-      }
+      fprintf(stderr, "[MinimalProfiler] WARNING: Failed to allocate new chunk of size %zu\n", chunkSize);
       return false;
     }
     
@@ -346,10 +323,8 @@ struct EventPool {
     chunks.push_back(newChunk);
     inUseChunks.push_back(newInUse);
     
-    if (logFile) {
-      fprintf(logFile, "[INFO] Event pool grown: added chunk %zu (total chunks: %zu, total slots: %zu)\n",
-              chunks.size() - 1, chunks.size(), chunks.size() * chunkSize);
-    }
+    fprintf(stderr, "[MinimalProfiler] INFO: Event pool grown: added chunk %zu (total chunks: %zu, total slots: %zu)\n",
+            chunks.size() - 1, chunks.size(), chunks.size() * chunkSize);
     
     return true;
   }
@@ -394,12 +369,10 @@ struct EventPool {
   }
   
   // Allocate an event from the pool (round-robin across chunks, avoiding blacklisted addresses)
-  MyEvent* allocate(Blacklist& blacklist, FILE* logFile = nullptr) {
+  MyEvent* allocate(Blacklist& blacklist) {
     // Defensive check: ensure we have at least one chunk
     if (chunks.empty() || chunkSize == 0) {
-      if (logFile) {
-        fprintf(logFile, "[ERROR] EventPool not initialized (chunks.empty() or chunkSize==0)\n");
-      }
+      fprintf(stderr, "[MinimalProfiler] ERROR: EventPool not initialized (chunks.empty() or chunkSize==0)\n");
       return nullptr;
     }
     
@@ -436,7 +409,7 @@ struct EventPool {
     
     // No suitable slot found - all are either in use or blacklisted
     // Try to grow the pool by adding a new chunk
-    if (grow(logFile)) {
+    if (grow()) {
       // New chunk is at the end of the vectors
       size_t newChunkIdx = chunks.size() - 1;
       // Start from slot 0 in the new chunk
@@ -454,9 +427,7 @@ struct EventPool {
     }
     
     // Pool growth failed - fall back to dynamic allocation
-    if (logFile) {
-      fprintf(logFile, "[WARNING] Pool exhausted and growth failed, using dynamic allocation\n");
-    }
+    fprintf(stderr, "[MinimalProfiler] WARNING: Pool exhausted and growth failed, using dynamic allocation\n");
     
     MyEvent* event = new (std::nothrow) MyEvent();
     if (event) {
@@ -490,18 +461,12 @@ struct EventPool {
 // ----------------------------------------------------------------------------
 // MyContext: Per-communicator plugin state
 // ----------------------------------------------------------------------------
-// ----------------------------------------------------------------------------
-// MyContext: Per-communicator plugin state
-// ----------------------------------------------------------------------------
 struct MyContext {
-  FILE* logFile;
-  pthread_mutex_t logMutex;     // Protects logFile I/O
   pthread_mutex_t allocMutex;   // Protects pool and blacklist
   uint64_t commId;
   int rank;
   int nranks;
   double startTime;
-  int cudaDev;                  // Physical GPU device ID (set once during init, never changes)
   char gpuUuid[37];             // Physical GPU UUID string (36 chars + null terminator)
   
   EventPool pool;
@@ -509,41 +474,39 @@ struct MyContext {
 };
 
 // ============================================================================
-// SECTION 3: PXN Detach Pool Module
+// SECTION 3: Process-Wide Global State
 // ============================================================================
-// When PXN (PCI x NVLink) routing is enabled, some ProxyOp events may be
-// executed by a different process than the one that originated them. The
-// parentObj pointer in such events points to the originator's address space,
-// which is invalid in the executing process.
+// These resources are shared across all communicators (contexts) within a single
+// process. They are initialized when the first communicator is created and
+// cleaned up when the last communicator is finalized.
 //
-// These events are "detached" because we cannot resolve their parent pointer.
-// We check eDescr->proxyOp.pid against our local myPid - if they differ, the
-// event originated from another process and its parentObj cannot be dereferenced.
-//
-// Detached events are stored in a separate pool shared across all contexts in
-// this process. We store parentObj as metadata (pointer value) for tracking
-// purposes but never dereference it.
+// PXN (PCI x NVLink) Support:
+// When PXN routing is enabled, some ProxyOp events may be executed by a different
+// process than the one that originated them. The parentObj pointer in such events
+// points to the originator's address space, which is invalid in the executing process.
+// These "detached" events are stored in a separate pool (pxnDetachPool) and we store
+// parentObj as metadata (pointer value) for tracking but never dereference it.
+// We detect PXN events by checking eDescr->proxyOp.pid against profilerPid.
 // ============================================================================
 
 // Forward declaration for utility function used in this section
 static double getTime();
 
-// Global state for PXN detach pool (shared across all contexts in this process)
-static pthread_mutex_t processInitMutex = PTHREAD_MUTEX_INITIALIZER;
-static int processInitCount = 0;             // Number of initialized communicators in this process
-static pid_t myPid = 0;                      // This process's PID (profiler plugin's process)
-static uint64_t myCommId = 0;                // commId for this profiler instance
-static EventPool* detachPool = nullptr;      // Pool for detached PXN ProxyOp events
-static Blacklist* detachBlacklist = nullptr; // Blacklist for detach pool
-static pthread_mutex_t detachMutex = PTHREAD_MUTEX_INITIALIZER;  // Protects detach pool and blacklist
-static FILE* detachLogFile = nullptr;        // Process-wide log file for PXN events
-static pthread_mutex_t detachLogMutex = PTHREAD_MUTEX_INITIALIZER;  // Protects detach log file
-static double detachStartTime = 0;           // Start time for PXN event timestamps
+// Lifecycle tracking for process-wide resources
+static pthread_mutex_t processStateMutex = PTHREAD_MUTEX_INITIALIZER;
+static int activeContextCount = 0;           // Number of active communicators in this process
+static pid_t profilerPid = 0;                // This process's PID (set once at first init)
+static uint64_t firstCommId = 0;             // First commId seen (used for file naming)
 
-// Global shared JSONL trace file (all ranks write to same file using O_APPEND)
-static FILE* sharedJsonlFile = nullptr;      // Shared trace file (opened with append mode)
-static pthread_mutex_t jsonlFileMutex = PTHREAD_MUTEX_INITIALIZER;  // Protects sharedJsonlFile writes
-static char sharedJsonlPath[512] = {0};      // Path to shared JSONL file
+// PXN Detach Pool: handles cross-process ProxyOp events
+static EventPool* pxnDetachPool = nullptr;
+static Blacklist* pxnDetachBlacklist = nullptr;
+static pthread_mutex_t pxnDetachMutex = PTHREAD_MUTEX_INITIALIZER;
+
+// Per-process JSONL trace file (each process writes to its own file)
+static FILE* sharedJsonlFile = nullptr;      // Per-process trace file (write mode, exclusive access)
+static pthread_mutex_t jsonlFileMutex = PTHREAD_MUTEX_INITIALIZER;  // Protects writes within this process
+static char sharedJsonlPath[512] = {0};      // Path to this process's JSONL file
 
 // Context registry: tracks all valid context pointers created by this process
 // When PXN routing is enabled, NCCL may pass context pointers from other processes
@@ -576,61 +539,39 @@ static void unregisterContext(MyContext* ctx) {
   pthread_mutex_unlock(&contextRegistryMutex);
 }
 
-// Initialize the detach pool (called on first communicator init)
-static bool initDetachPool() {
-  detachPool = new (std::nothrow) EventPool();
-  detachBlacklist = new (std::nothrow) Blacklist();
+// Initialize the PXN detach pool (called on first communicator init)
+static bool initPxnDetachPool() {
+  pxnDetachPool = new (std::nothrow) EventPool();
+  pxnDetachBlacklist = new (std::nothrow) Blacklist();
   
-  if (!detachPool || !detachBlacklist) {
-    delete detachPool;
-    delete detachBlacklist;
-    detachPool = nullptr;
-    detachBlacklist = nullptr;
+  if (!pxnDetachPool || !pxnDetachBlacklist) {
+    delete pxnDetachPool;
+    delete pxnDetachBlacklist;
+    pxnDetachPool = nullptr;
+    pxnDetachBlacklist = nullptr;
     return false;
   }
   
-  if (!detachPool->init(INITIAL_DETACH_POOL_SIZE)) {
-    delete detachPool;
-    delete detachBlacklist;
-    detachPool = nullptr;
-    detachBlacklist = nullptr;
+  if (!pxnDetachPool->init(INITIAL_DETACH_POOL_SIZE)) {
+    delete pxnDetachPool;
+    delete pxnDetachBlacklist;
+    pxnDetachPool = nullptr;
+    pxnDetachBlacklist = nullptr;
     return false;
   }
   
   return true;
 }
 
-// Initialize the PXN log file (called on first communicator init)
-static bool initPxnLogFile(const char* dirname, uint64_t commId) {
-  // Create process-wide log file for PXN events with commId in filename
-  char pxnLogPath[512];
-  snprintf(pxnLogPath, sizeof(pxnLogPath), "%s/minimal_profiler_pxn_events_pid%d_comm%lu.log", 
-           dirname, static_cast<int>(myPid), commId);
-  detachLogFile = fopen(pxnLogPath, "w");
-  if (detachLogFile) {
-    detachStartTime = getTime();
-    fprintf(detachLogFile, "=== PXN Events Log (Process PID: %d, CommId: %lu) ===\n", 
-            static_cast<int>(myPid), commId);
-    fprintf(detachLogFile, "CommId: %lu\n", commId);
-    fprintf(detachLogFile, "Start time: %.0f us\n", detachStartTime);
-    fprintf(detachLogFile, "This file contains ProxyOp events from other processes (PXN routing)\n");
-    fprintf(detachLogFile, "================================================\n\n");
-    fflush(detachLogFile);
-  }
-  // Note: We continue even if log file creation fails - events just won't be logged
-  
-  return detachLogFile != nullptr;
-}
-
-// Allocate an event from the detach pool
-static MyEvent* allocateFromDetachPool(FILE* logFile = nullptr) {
-  if (!detachPool || !detachBlacklist) {
+// Allocate an event from the PXN detach pool
+static MyEvent* allocateFromPxnPool() {
+  if (!pxnDetachPool || !pxnDetachBlacklist) {
     return nullptr;
   }
   
-  pthread_mutex_lock(&detachMutex);
-  MyEvent* event = detachPool->allocate(*detachBlacklist, logFile);
-  pthread_mutex_unlock(&detachMutex);
+  pthread_mutex_lock(&pxnDetachMutex);
+  MyEvent* event = pxnDetachPool->allocate(*pxnDetachBlacklist);
+  pthread_mutex_unlock(&pxnDetachMutex);
   
   if (event) {
     event->fromDetachPool = true;
@@ -640,58 +581,49 @@ static MyEvent* allocateFromDetachPool(FILE* logFile = nullptr) {
   return event;
 }
 
-// Free an event back to the detach pool
-static void freeToDetachPool(MyEvent* event) {
-  if (!detachPool) return;
+// Free an event back to the PXN detach pool
+static void freeToPxnPool(MyEvent* event) {
+  if (!pxnDetachPool) return;
   
-  pthread_mutex_lock(&detachMutex);
-  detachPool->free(event);
-  pthread_mutex_unlock(&detachMutex);
+  pthread_mutex_lock(&pxnDetachMutex);
+  pxnDetachPool->free(event);
+  pthread_mutex_unlock(&pxnDetachMutex);
 }
 
-// Track a parent address in the detach blacklist
-static void trackDetachParent(void* parentObj, FILE* logFile = nullptr) {
-  if (!parentObj || !detachBlacklist) return;
+// Track a parent address in the PXN blacklist
+static void trackPxnParent(void* parentObj) {
+  if (!parentObj || !pxnDetachBlacklist) return;
   
-  pthread_mutex_lock(&detachMutex);
-  if (detachBlacklist->contains(parentObj)) {
-    detachBlacklist->incrementRef(parentObj);
+  pthread_mutex_lock(&pxnDetachMutex);
+  if (pxnDetachBlacklist->contains(parentObj)) {
+    pxnDetachBlacklist->incrementRef(parentObj);
   } else {
-    detachBlacklist->add(parentObj, logFile);
+    pxnDetachBlacklist->add(parentObj);
   }
-  pthread_mutex_unlock(&detachMutex);
+  pthread_mutex_unlock(&pxnDetachMutex);
 }
 
-// Release a parent address from the detach blacklist
-static void releaseDetachParent(void* parentObj) {
-  if (!parentObj || !detachBlacklist) return;
+// Release a parent address from the PXN blacklist
+static void releasePxnParent(void* parentObj) {
+  if (!parentObj || !pxnDetachBlacklist) return;
   
-  pthread_mutex_lock(&detachMutex);
-  detachBlacklist->decrementRef(parentObj);
-  pthread_mutex_unlock(&detachMutex);
+  pthread_mutex_lock(&pxnDetachMutex);
+  pxnDetachBlacklist->decrementRef(parentObj);
+  pthread_mutex_unlock(&pxnDetachMutex);
 }
 
-// Clean up the detach pool and log file (called when last communicator is finalized)
-static void cleanupDetachPool() {
-  // Close the PXN log file
-  if (detachLogFile) {
-    fprintf(detachLogFile, "\n=== PXN Events Log Finalized ===\n");
-    fclose(detachLogFile);
-    detachLogFile = nullptr;
-  }
-  
+// Clean up process-wide resources (called when last communicator is finalized)
+static void cleanupProcessResources() {
   // Close the shared JSONL file
   closeSharedJsonlFile();
   pthread_mutex_destroy(&jsonlFileMutex);
   
-  delete detachPool;
-  delete detachBlacklist;
-  detachPool = nullptr;
-  detachBlacklist = nullptr;
-  myPid = 0;
-  detachStartTime = 0;
-  pthread_mutex_destroy(&detachMutex);
-  pthread_mutex_destroy(&detachLogMutex);
+  delete pxnDetachPool;
+  delete pxnDetachBlacklist;
+  pxnDetachPool = nullptr;
+  pxnDetachBlacklist = nullptr;
+  profilerPid = 0;
+  pthread_mutex_destroy(&pxnDetachMutex);
   
   // Clean up the context registry
   pthread_mutex_lock(&contextRegistryMutex);
@@ -761,29 +693,33 @@ static std::string formatPointerStd(const void* ptr) {
   return std::string(buf);
 }
 
-// Initialize the shared JSONL trace file (called on first communicator init)
+// Initialize the per-process JSONL trace file (called on first communicator init)
+// Each process writes to its own file to avoid interleaving issues on network filesystems
+// (NFS, Lustre, GPFS do not honor O_APPEND atomicity guarantees)
 static bool initSharedJsonlFile(const char* dirname) {
   const char* slurm_job_id = getenv("SLURM_JOB_ID");
+  pid_t pid = getpid();
   
   if (slurm_job_id && slurm_job_id[0] != '\0') {
+    // Use SLURM job ID for grouping, but actual PID for process identification
     snprintf(sharedJsonlPath, sizeof(sharedJsonlPath), 
-             "%s/trace_%s.jsonl", dirname, slurm_job_id);
+             "%s/trace_%s_pid%d.jsonl", dirname, slurm_job_id, static_cast<int>(pid));
   } else {
-    // Fallback to timestamp-based naming
+    // No SLURM - use timestamp + PID for unique naming
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     snprintf(sharedJsonlPath, sizeof(sharedJsonlPath), 
-             "%s/trace_%ld.jsonl", dirname, ts.tv_sec);
+             "%s/trace_%ld_pid%d.jsonl", dirname, ts.tv_sec, static_cast<int>(pid));
   }
   
-  // Open in append mode (O_APPEND) - POSIX guarantees atomic appends for complete lines
-  sharedJsonlFile = fopen(sharedJsonlPath, "a");
+  // Open in write mode - this file is exclusive to this process, no append/locking needed
+  sharedJsonlFile = fopen(sharedJsonlPath, "w");
   if (!sharedJsonlFile) {
-    fprintf(stderr, "[MinimalProfiler] WARNING: Failed to open shared JSONL file: %s\n", sharedJsonlPath);
+    fprintf(stderr, "[MinimalProfiler] WARNING: Failed to open JSONL file: %s\n", sharedJsonlPath);
     return false;
   }
   
-  fprintf(stderr, "[MinimalProfiler] Shared JSONL trace file: %s\n", sharedJsonlPath);
+  fprintf(stderr, "[MinimalProfiler] JSONL trace file: %s\n", sharedJsonlPath);
   return true;
 }
 
@@ -854,79 +790,54 @@ static int ensureDumpDir(const char* dirname) {
 }
 
 // ----------------------------------------------------------------------------
-// Logging Helper Functions
+// JSONL Writers - Separate Records for Events and States
+// ----------------------------------------------------------------------------
+// Each JSONL line is small and atomic (<3KB). No buffering needed.
+// - "event" records: written at STOP time with start/stop info and details
+// - "state" records: written immediately at STATE time with eventAddr reference
+// The visualizer reconstructs full events by matching states to their eventAddr.
 // ----------------------------------------------------------------------------
 
-// Helper function to log START events (handles both normal and detached PXN events)
-static void logStartEvent(MyEvent* event, void* parentObj, const char* fmt, ...) {
-  if (!event) return;
-  
-  pid_t pid = getpid();
-  pid_t tid = getTid();
-  
-  // Check if this is a detached PXN event
-  if (event->fromDetachPool) {
-    // Use process-wide detach log file
-    if (!detachLogFile) return;
-    
-    pthread_mutex_lock(&detachLogMutex);
-    if (*fmt != '\0') {
-      va_list args;
-      va_start(args, fmt);
-      fprintf(detachLogFile, "[%.3f] START %s (pid=%d, tid=%d, PXN from pid=%d, ", 
-              event->startTime - detachStartTime, event->typeName, 
-              static_cast<int>(pid), tid, static_cast<int>(event->originPid));
-      vfprintf(detachLogFile, fmt, args);
-      va_end(args);
-      fprintf(detachLogFile, ", parentObj=%p, event=%p)\n",
-              parentObj, static_cast<void*>(event));
-    } else {
-      fprintf(detachLogFile, "[%.3f] START %s (pid=%d, tid=%d, PXN from pid=%d, parentObj=%p, event=%p)\n",
-              event->startTime - detachStartTime, event->typeName, 
-              static_cast<int>(pid), tid, static_cast<int>(event->originPid),
-              parentObj, static_cast<void*>(event));
-    }
-    fflush(detachLogFile);
-    pthread_mutex_unlock(&detachLogMutex);
-  } else {
-    // Normal event - use context's log file
-    MyContext* ctx = event->ctx;
-    if (!ctx || !ctx->logFile) return;
-    
-    pthread_mutex_lock(&ctx->logMutex);
-    if (*fmt != '\0') {
-      va_list args;
-      va_start(args, fmt);
-      fprintf(ctx->logFile, "[%.3f] START %s (pid=%d, tid=%d, gpu_uuid=%s, ", 
-              event->startTime, event->typeName, static_cast<int>(pid), tid, 
-              ctx->gpuUuid[0] != '\0' ? ctx->gpuUuid : "unknown");
-      vfprintf(ctx->logFile, fmt, args);
-      va_end(args);
-      fprintf(ctx->logFile, ", parentObj=%p, event=%p, ctx=%p)\n",
-              parentObj, static_cast<void*>(event), static_cast<void*>(ctx));
-    } else {
-      fprintf(ctx->logFile, "[%.3f] START %s (pid=%d, tid=%d, gpu_uuid=%s, parentObj=%p, event=%p, ctx=%p)\n",
-              event->startTime, event->typeName, static_cast<int>(pid), tid, 
-              ctx->gpuUuid[0] != '\0' ? ctx->gpuUuid : "unknown",
-              parentObj, static_cast<void*>(event), static_cast<void*>(ctx));
-    }
-    fflush(ctx->logFile);
-    pthread_mutex_unlock(&ctx->logMutex);
-  }
-}
-
-// ----------------------------------------------------------------------------
-// JSONL Complete Event Writer
-// Writes a single complete event with all accumulated states (called at STOP)
-// Uses dynamic std::string - no fixed buffer size limits
-// ----------------------------------------------------------------------------
-
-static void writeJsonlCompleteEvent(MyEvent* event, double endTime, double duration, pid_t stopTid) {
+// Write a state transition record to JSONL (called immediately at STATE time)
+static void writeJsonlStateRecord(MyEvent* event, double timestamp, const char* stateName,
+                                   int stateId, pid_t pid, pid_t tid, const std::string& details) {
   if (!event || !sharedJsonlFile) return;
   
-  // Build the complete event JSON using std::string (dynamic, no size limits)
-  std::string json = "{\"type\":\"" + escapeJsonStringStd(event->typeName ? event->typeName : "Unknown") + "\"" +
-                     ",\"func\":\"" + escapeJsonStringStd(event->func ? event->func : "Unknown") + "\"";
+  char buf[64];
+  snprintf(buf, sizeof(buf), "%.3f", timestamp);
+  
+  std::string json = "{\"recordType\":\"state\"" +
+                     std::string(",\"eventAddr\":\"") + formatPointerStd(static_cast<void*>(event)) + "\"" +
+                     ",\"ts\":" + std::string(buf) +
+                     ",\"name\":\"" + escapeJsonStringStd(stateName) + "\"" +
+                     ",\"id\":" + std::to_string(stateId) +
+                     ",\"pid\":" + std::to_string(static_cast<int>(pid)) +
+                     ",\"tid\":" + std::to_string(static_cast<int>(tid));
+  
+  if (!details.empty()) {
+    json += "," + details;
+  }
+  json += "}\n";
+  
+  // Write directly to per-process file (no cross-process coordination needed)
+  pthread_mutex_lock(&jsonlFileMutex);
+  if (sharedJsonlFile) {
+    int fd = fileno(sharedJsonlFile);
+    if (fd >= 0) {
+      ssize_t written = write(fd, json.c_str(), json.size());
+      (void)written;
+    }
+  }
+  pthread_mutex_unlock(&jsonlFileMutex);
+}
+
+// Write an event record to JSONL (called at STOP time - no embedded states)
+static void writeJsonlEventRecord(MyEvent* event, double endTime, double duration, pid_t stopTid) {
+  if (!event || !sharedJsonlFile) return;
+  
+  // Build the event JSON - (event states are separate records)
+  std::string json = "{\"recordType\":\"event\"" +
+                     std::string(",\"type\":\"") + escapeJsonStringStd(event->typeName ? event->typeName : "Unknown") + "\"";
   
   if (!event->fromDetachPool) {
     // Normal event - include gpuUuid, commId, rank, ctx
@@ -950,7 +861,7 @@ static void writeJsonlCompleteEvent(MyEvent* event, double endTime, double durat
   snprintf(buf, sizeof(buf), "%.3f", duration);
   json += ",\"duration\":" + std::string(buf);
   
-  json += ",\"myPid\":" + std::to_string(static_cast<int>(myPid));
+  json += ",\"myPid\":" + std::to_string(static_cast<int>(profilerPid));
   
   if (event->fromDetachPool) {
     json += ",\"originPid\":" + std::to_string(static_cast<int>(event->originPid));
@@ -967,33 +878,18 @@ static void writeJsonlCompleteEvent(MyEvent* event, double endTime, double durat
     json += ",\"isPxn\":true";
   }
   
-  // Build states array - dynamic, no limit on number of states
-  json += ",\"states\":[";
-  for (size_t i = 0; i < event->states.size(); i++) {
-    const StateTransition& st = event->states[i];
-    if (i > 0) json += ",";
-    
-    snprintf(buf, sizeof(buf), "%.3f", st.timestamp);
-    json += "{\"ts\":" + std::string(buf) +
-            ",\"name\":\"" + escapeJsonStringStd(st.stateName.c_str()) + "\"" +
-            ",\"id\":" + std::to_string(st.stateId) +
-            ",\"pid\":" + std::to_string(static_cast<int>(st.pid)) +
-            ",\"tid\":" + std::to_string(static_cast<int>(st.tid));
-    
-    if (!st.details.empty()) {
-      json += "," + st.details;
-    }
-    json += "}";
-  }
-  json += "]";
+  // Add details (no states array - states are separate records)
+  json += ",\"details\":{" + event->startDetails + "}}\n";
   
-  // Add details
-  json += ",\"details\":{" + event->startDetails + "}}";
-  
-  // Write the complete JSON line
+  // Write directly to per-process file (no cross-process coordination needed)
   pthread_mutex_lock(&jsonlFileMutex);
-  fprintf(sharedJsonlFile, "%s\n", json.c_str());
-  fflush(sharedJsonlFile);
+  if (sharedJsonlFile) {
+    int fd = fileno(sharedJsonlFile);
+    if (fd >= 0) {
+      ssize_t written = write(fd, json.c_str(), json.size());
+      (void)written;
+    }
+  }
   pthread_mutex_unlock(&jsonlFileMutex);
 }
 
@@ -1021,13 +917,19 @@ static void writeJsonlLifecycleEvent(const char* action, double timestamp,
                      ",\"pid\":" + std::to_string(static_cast<int>(pid)) +
                      ",\"tid\":" + std::to_string(static_cast<int>(tid)) + "}" +
                      ",\"duration\":0.0" +
-                     ",\"myPid\":" + std::to_string(static_cast<int>(myPid)) +
+                     ",\"myPid\":" + std::to_string(static_cast<int>(profilerPid)) +
                      ",\"states\":[]" +
-                     ",\"details\":{" + detailsJson + "}}";
+                     ",\"details\":{" + detailsJson + "}}\n";
   
+  // Write directly to per-process file (no cross-process coordination needed)
   pthread_mutex_lock(&jsonlFileMutex);
-  fprintf(sharedJsonlFile, "%s\n", json.c_str());
-  fflush(sharedJsonlFile);
+  if (sharedJsonlFile) {
+    int fd = fileno(sharedJsonlFile);
+    if (fd >= 0) {
+      ssize_t written = write(fd, json.c_str(), json.size());
+      (void)written;
+    }
+  }
   pthread_mutex_unlock(&jsonlFileMutex);
 }
 
@@ -1106,7 +1008,7 @@ ncclResult_t myInit(void** context, uint64_t commId, int* eActivationMask,
   fprintf(stderr, "[MinimalProfiler] Init called: tid=%d, rank=%d/%d, commId=%lu, eventMask=0x%x\n",
           tid, rank, nranks, commId, mask);
   
-  // Get dump directory name (needed for both per-context logs and PXN log)
+  // Get dump directory name (needed for JSONL trace file)
   char dirname[256];
   if (!getDumpDir(dirname, sizeof(dirname))) {
     return ncclSystemError;
@@ -1118,32 +1020,27 @@ ncclResult_t myInit(void** context, uint64_t commId, int* eActivationMask,
   }
   
   // Initialize process-wide state on first communicator init
-  pthread_mutex_lock(&processInitMutex);
-  if (processInitCount == 0) {
-    myPid = getpid();
-    myCommId = commId;  // Store commId for this profiler instance
+  pthread_mutex_lock(&processStateMutex);
+  if (activeContextCount == 0) {
+    profilerPid = getpid();
+    firstCommId = commId;  // Store commId for this profiler instance
     
-    if (initDetachPool()) {
-      fprintf(stderr, "[MinimalProfiler] Init: myPid=%d, myCommId=%lu\n",
-              static_cast<int>(myPid), myCommId);
+    if (initPxnDetachPool()) {
+      fprintf(stderr, "[MinimalProfiler] Init: profilerPid=%d, firstCommId=%lu\n",
+              static_cast<int>(profilerPid), firstCommId);
     } else {
       fprintf(stderr, "[MinimalProfiler] WARNING: Failed to initialize detach pool\n");
     }
-    if (initPxnLogFile(dirname, commId)) {
-      fprintf(stderr, "[MinimalProfiler] PXN log file initialized\n");
-    } else {
-      fprintf(stderr, "[MinimalProfiler] WARNING: Failed to initialize PXN log file\n");
-    }
     
-    // Initialize shared JSONL trace file (all ranks write to same file)
+    // Initialize per-process JSONL trace file
     if (initSharedJsonlFile(dirname)) {
-      fprintf(stderr, "[MinimalProfiler] Shared JSONL trace file initialized\n");
+      fprintf(stderr, "[MinimalProfiler] JSONL trace file initialized\n");
     } else {
-      fprintf(stderr, "[MinimalProfiler] WARNING: Failed to initialize shared JSONL file\n");
+      fprintf(stderr, "[MinimalProfiler] WARNING: Failed to initialize JSONL file\n");
     }
   }
-  processInitCount++;
-  pthread_mutex_unlock(&processInitMutex);
+  activeContextCount++;
+  pthread_mutex_unlock(&processStateMutex);
   
   // Allocate context
   MyContext* ctx = new (std::nothrow) MyContext();
@@ -1153,22 +1050,13 @@ ncclResult_t myInit(void** context, uint64_t commId, int* eActivationMask,
   ctx->rank = rank;
   ctx->nranks = nranks;
   ctx->startTime = getTime();
-  ctx->logFile = nullptr;
-  ctx->cudaDev = -1;  // Initialize to invalid value
   ctx->gpuUuid[0] = '\0';  // Initialize to empty string
   
-  // Get the CUDA device ID for this communicator (set once, never changes)
-  cudaError_t cudaErr = cudaGetDevice(&ctx->cudaDev);
-  if (cudaErr != cudaSuccess) {
-    // If CUDA query fails, log warning but continue (device will be -1)
-    fprintf(stderr, "[MinimalProfiler] WARNING: Failed to get CUDA device: %s\n", 
-            cudaGetErrorString(cudaErr));
-    ctx->cudaDev = -1;
-  } else {
-    // Get device properties to extract UUID (more reliable than device ID)
+  // Get GPU UUID from current CUDA device
+  int dev;
+  if (cudaGetDevice(&dev) == cudaSuccess) {
     cudaDeviceProp deviceProp;
-    cudaErr = cudaGetDeviceProperties(&deviceProp, ctx->cudaDev);
-    if (cudaErr == cudaSuccess) {
+    if (cudaGetDeviceProperties(&deviceProp, dev) == cudaSuccess) {
       // Format UUID as standard string: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
       snprintf(ctx->gpuUuid, sizeof(ctx->gpuUuid),
                "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
@@ -1180,62 +1068,24 @@ ncclResult_t myInit(void** context, uint64_t commId, int* eActivationMask,
                deviceProp.uuid.bytes[10], deviceProp.uuid.bytes[11],
                deviceProp.uuid.bytes[12], deviceProp.uuid.bytes[13],
                deviceProp.uuid.bytes[14], deviceProp.uuid.bytes[15]);
-    } else {
-      fprintf(stderr, "[MinimalProfiler] WARNING: Failed to get device properties: %s\n", 
-              cudaGetErrorString(cudaErr));
     }
   }
   
-  // Initialize mutexes
-  if (pthread_mutex_init(&ctx->logMutex, nullptr) != 0) {
-    delete ctx;
-    return ncclSystemError;
-  }
+  // Initialize mutex for pool/blacklist access
   if (pthread_mutex_init(&ctx->allocMutex, nullptr) != 0) {
-    pthread_mutex_destroy(&ctx->logMutex);
     delete ctx;
     return ncclSystemError;
   }
   
   // Initialize event pool
   if (!ctx->pool.init(INITIAL_POOL_SIZE)) {
-    pthread_mutex_destroy(&ctx->logMutex);
     pthread_mutex_destroy(&ctx->allocMutex);
     delete ctx;
     return ncclSystemError;
   }
   
-  // Open log file (dump directory already created above)
-  char filename[512];
-  snprintf(filename, sizeof(filename), "%s/minimal_profiler_rank%d_comm%lu.log", 
-           dirname, rank, commId);
-  ctx->logFile = fopen(filename, "w");
-  if (!ctx->logFile) {
-    pthread_mutex_destroy(&ctx->logMutex);
-    pthread_mutex_destroy(&ctx->allocMutex);
-    delete ctx;
-    return ncclSystemError;
-  }
-  
-  // Write header to log file
-  pthread_mutex_lock(&ctx->logMutex);
-  fprintf(ctx->logFile, "=== Profiler initialized ===\n");
-  fprintf(ctx->logFile, "Process ID (pid): %d\n", static_cast<int>(myPid));
-  fprintf(ctx->logFile, "Init thread ID (tid): %d\n", tid);
-  fprintf(ctx->logFile, "Start time: %.0f us\n", ctx->startTime);
-  fprintf(ctx->logFile, "Dump directory: %s\n", dirname);
-  fprintf(ctx->logFile, "Event activation mask: 0x%x\n", mask);
-  fprintf(ctx->logFile, "Event pool size: %zu\n", INITIAL_POOL_SIZE);
-  fprintf(ctx->logFile, "Blacklist cap: %zu\n", BLACKLIST_CAP);
-  fprintf(ctx->logFile, "Physical GPU device ID: %d\n", ctx->cudaDev);
-  fprintf(ctx->logFile, "Physical GPU UUID: %s\n", ctx->gpuUuid[0] != '\0' ? ctx->gpuUuid : "(unknown)");
-  fprintf(ctx->logFile, "Rank: %d/%d, CommId: %lu, CommName: %s, ctx=%p\n", 
-           rank, nranks, commId, commName ? commName : "(null)", static_cast<void*>(ctx));
-  fflush(ctx->logFile);
-  pthread_mutex_unlock(&ctx->logMutex);
-  
-  fprintf(stderr, "[MinimalProfiler] Successfully initialized: tid=%d, log=%s, pool_size=%zu\n", 
-          tid, filename, INITIAL_POOL_SIZE);
+  fprintf(stderr, "[MinimalProfiler] Successfully initialized: tid=%d, rank=%d, commId=%lu, pool_size=%zu\n", 
+          tid, rank, commId, INITIAL_POOL_SIZE);
   
   // Register this context in the process-wide registry for PXN validation
   registerContext(ctx);
@@ -1244,8 +1094,7 @@ ncclResult_t myInit(void** context, uint64_t commId, int* eActivationMask,
   {
     std::string detailsJson = "\"nranks\":" + std::to_string(nranks) +
                               ",\"commName\":\"" + escapeJsonStringStd(commName ? commName : "") + "\"" +
-                              ",\"eventMask\":" + std::to_string(mask) +
-                              ",\"cudaDev\":" + std::to_string(ctx->cudaDev);
+                              ",\"eventMask\":" + std::to_string(mask);
     writeJsonlLifecycleEvent("ProfilerInit", ctx->startTime, ctx->gpuUuid, commId, rank, detailsJson);
   }
   
@@ -1270,7 +1119,7 @@ ncclResult_t myStartEvent(void* context, void** eHandle,
   // our address space.
   //
   // We detect this in two ways:
-  // 1. For ProxyOp events: check eDescr->proxyOp.pid against our myPid
+  // 1. For ProxyOp events: check eDescr->proxyOp.pid against our profilerPid
   // 2. For ALL events: check if context is in our registry of valid contexts
   //
   // If the context is invalid, we treat the event as "detached" and use the
@@ -1286,7 +1135,7 @@ ncclResult_t myStartEvent(void* context, void** eHandle,
   if (eDescr->type == ncclProfileProxyOp) {
     eventPid = eDescr->proxyOp.pid;
     // If pid doesn't match, context is definitely from another process
-    if (eventPid != myPid) {
+    if (eventPid != profilerPid) {
       contextValid = false;
     }
   }
@@ -1294,7 +1143,7 @@ ncclResult_t myStartEvent(void* context, void** eHandle,
   // Allocate event from appropriate pool based on context validity
   if (!contextValid) {
     // Detached PXN event - ctx is invalid, use process-wide detach pool
-    event = allocateFromDetachPool(detachLogFile);
+    event = allocateFromPxnPool();
     if (!event) {
       *eHandle = nullptr;
       return ncclSuccess;  // Pool allocation failed - drop this event gracefully
@@ -1314,15 +1163,14 @@ ncclResult_t myStartEvent(void* context, void** eHandle,
     event->gpuUuid[0] = '\0';  // Not available for PXN
     event->commId = 0;          // Not available for PXN
     event->rank = -1;           // Not available for PXN
-    event->states.clear();      // Ensure empty vector
     event->startDetails.clear(); // Will be populated in switch below
     
     // Track parentObj in detach blacklist to prevent address reuse
-    trackDetachParent(eDescr->parentObj, detachLogFile);
+    trackPxnParent(eDescr->parentObj);
   } else {
     // Normal event - context is valid, use per-context pool
     pthread_mutex_lock(&ctx->allocMutex);
-    event = ctx->pool.allocate(ctx->blacklist, ctx->logFile);
+    event = ctx->pool.allocate(ctx->blacklist);
     pthread_mutex_unlock(&ctx->allocMutex);
     
     if (!event) {
@@ -1346,7 +1194,6 @@ ncclResult_t myStartEvent(void* context, void** eHandle,
     event->gpuUuid[sizeof(event->gpuUuid) - 1] = '\0';
     event->commId = ctx->commId;
     event->rank = ctx->rank;
-    event->states.clear();       // Ensure empty vector
     event->startDetails.clear(); // Will be populated in switch below
     
     // Handle parent reference (add to blacklist) - only for local events
@@ -1355,91 +1202,10 @@ ncclResult_t myStartEvent(void* context, void** eHandle,
       if (ctx->blacklist.contains(eDescr->parentObj)) {
         ctx->blacklist.incrementRef(eDescr->parentObj);
       } else {
-        ctx->blacklist.add(eDescr->parentObj, ctx->logFile);
+        ctx->blacklist.add(eDescr->parentObj);
       }
       pthread_mutex_unlock(&ctx->allocMutex);
     }
-  }
-  
-  // Extract information based on event type and log
-  switch (eDescr->type) {
-    case ncclProfileGroupApi:
-      event->func = "GroupAPI";
-      logStartEvent(event, eDescr->parentObj, "depth=%d, graphCaptured=%d",
-                    eDescr->groupApi.groupDepth, eDescr->groupApi.graphCaptured ? 1 : 0);
-      break;
-      
-    case ncclProfileCollApi:
-      event->func = eDescr->collApi.func;
-      logStartEvent(event, eDescr->parentObj, "func=%s, count=%zu, dtype=%s, root=%d, stream=%p, graphCaptured=%d",
-                    eDescr->collApi.func, eDescr->collApi.count, eDescr->collApi.datatype,
-                    eDescr->collApi.root, eDescr->collApi.stream, eDescr->collApi.graphCaptured ? 1 : 0);
-      break;
-      
-    case ncclProfileP2pApi:
-      event->func = eDescr->p2pApi.func;
-      logStartEvent(event, eDescr->parentObj, "func=%s, count=%zu, dtype=%s, stream=%p, graphCaptured=%d",
-                    eDescr->p2pApi.func, eDescr->p2pApi.count, eDescr->p2pApi.datatype,
-                    eDescr->p2pApi.stream, eDescr->p2pApi.graphCaptured ? 1 : 0);
-      break;
-      
-    case ncclProfileKernelLaunch:
-      event->func = "KernelLaunch";
-      logStartEvent(event, eDescr->parentObj, "stream=%p", eDescr->kernelLaunch.stream);
-      break;
-    
-    case ncclProfileColl:
-      event->func = eDescr->coll.func;
-      logStartEvent(event, eDescr->parentObj, "func=%s, seq=%lu, algo=%s, proto=%s, channels=%d, warps=%d, count=%zu, root=%d, dtype=%s, sendBuff=%p, recvBuff=%p, parentGroup=%p",
-                    eDescr->coll.func, eDescr->coll.seqNumber, eDescr->coll.algo, eDescr->coll.proto,
-                    eDescr->coll.nChannels, eDescr->coll.nWarps, eDescr->coll.count, eDescr->coll.root,
-                    eDescr->coll.datatype, eDescr->coll.sendBuff, eDescr->coll.recvBuff, eDescr->coll.parentGroup);
-      break;
-      
-    case ncclProfileP2p:
-      event->func = eDescr->p2p.func;
-      logStartEvent(event, eDescr->parentObj, "func=%s, peer=%d, channels=%d, count=%zu, dtype=%s, buff=%p, parentGroup=%p",
-                    eDescr->p2p.func, eDescr->p2p.peer, eDescr->p2p.nChannels, eDescr->p2p.count,
-                    eDescr->p2p.datatype, eDescr->p2p.buff, eDescr->p2p.parentGroup);
-      break;
-      
-    case ncclProfileProxyOp:
-      event->func = "ProxyOp";
-      logStartEvent(event, eDescr->parentObj, "channel=%d, peer=%d, steps=%d, chunkSize=%d, isSend=%d, eventPid=%d",
-                    eDescr->proxyOp.channelId, eDescr->proxyOp.peer, eDescr->proxyOp.nSteps,
-                    eDescr->proxyOp.chunkSize, eDescr->proxyOp.isSend, static_cast<int>(eDescr->proxyOp.pid));
-      break;
-      
-    case ncclProfileProxyStep:
-      event->func = "ProxyStep";
-      logStartEvent(event, eDescr->parentObj, "step=%d", eDescr->proxyStep.step);
-      break;
-      
-    case ncclProfileProxyCtrl:
-      event->func = "ProxyCtrl";
-      logStartEvent(event, eDescr->parentObj, "");
-      break;
-      
-    case ncclProfileKernelCh:
-      event->func = "KernelCh";
-      logStartEvent(event, eDescr->parentObj, "channel=%d, pTimer=%lu", eDescr->kernelCh.channelId, eDescr->kernelCh.pTimer);
-      break;
-      
-    case ncclProfileNetPlugin:
-      event->func = "NetPlugin";
-      logStartEvent(event, eDescr->parentObj, "id=%ld, data=%p", static_cast<long>(eDescr->netPlugin.id), eDescr->netPlugin.data);
-      break;
-      
-    case ncclProfileGroup:
-      event->func = "Group";
-      logStartEvent(event, eDescr->parentObj, "");
-      break;
-      
-    default:
-      event->func = "Unknown";
-      event->typeName = "ncclProfileUnknown";
-      logStartEvent(event, eDescr->parentObj, "type=0x%lx", static_cast<unsigned long>(eDescr->type));
-      break;
   }
   
   // Build startDetails JSON for later JSONL output (stored in event, written on STOP)
@@ -1540,34 +1306,15 @@ ncclResult_t myStopEvent(void* eHandle) {
   double endTime = getTime();
   double duration = (endTime - event->startTime);
   pid_t tid = getTid();
-  pid_t pid = getpid();
   
   // Handle detached PXN ProxyOp events from the detach pool
-  // Note: ctx is nullptr for PXN events - use process-wide detachLogFile
   if (event->fromDetachPool) {
-    // Log to process-wide PXN log file
-    if (detachLogFile) {
-      pthread_mutex_lock(&detachLogMutex);
-      fprintf(detachLogFile, "[%.3f] STOP %s::%s (pid=%d, tid=%d, PXN event origin pid=%d, duration=%.3f us, parentObj=%p, event=%p)\n",
-              endTime - detachStartTime,
-              event->typeName ? event->typeName : "ncclProfileUnknown",
-              event->func ? event->func : "Unknown",
-              static_cast<int>(pid),
-              tid,
-              static_cast<int>(event->originPid),
-              duration,
-              event->parentObj,
-              static_cast<void*>(event));
-      fflush(detachLogFile);
-      pthread_mutex_unlock(&detachLogMutex);
-    }
-    
-    // Write complete JSONL event (PXN)
-    writeJsonlCompleteEvent(event, endTime, duration, tid);
+    // Write JSONL event (PXN)
+    writeJsonlEventRecord(event, endTime, duration, tid);
     
     // Release parent reference and free to detach pool
-    releaseDetachParent(event->parentObj);
-    freeToDetachPool(event);
+    releasePxnParent(event->parentObj);
+    freeToPxnPool(event);
     
     return ncclSuccess;
   }
@@ -1577,21 +1324,8 @@ ncclResult_t myStopEvent(void* eHandle) {
     return ncclSuccess;  // Drop event if ctx is somehow NULL
   }
   
-  pthread_mutex_lock(&ctx->logMutex);
-  fprintf(ctx->logFile, "[%.3f] STOP %s::%s (pid=%d, tid=%d, gpu_uuid=%s, duration=%.3f us, event=%p, ctx=%p)\n",
-          endTime,
-          event->typeName ? event->typeName : "ncclProfileUnknown",
-          event->func ? event->func : "Unknown",
-          static_cast<int>(pid),
-          tid,
-          ctx->gpuUuid[0] != '\0' ? ctx->gpuUuid : "unknown",
-          duration,
-          static_cast<void*>(event),
-          static_cast<void*>(ctx));
-  pthread_mutex_unlock(&ctx->logMutex);
-  
-  // Write complete JSONL event (normal)
-  writeJsonlCompleteEvent(event, endTime, duration, tid);
+  // Write JSONL event (normal)
+  writeJsonlEventRecord(event, endTime, duration, tid);
   
   // Decrement parent reference in blacklist
   if (event->parentObj) {
@@ -1628,63 +1362,21 @@ ncclResult_t myRecordEventState(void* eHandle,
   
   const char* stateName = getStateName(eState);
   
-  // Handle PXN events (ctx is nullptr) - use process-wide detach log
+  // Handle PXN events (ctx is nullptr)
   if (event->fromDetachPool) {
-    if (detachLogFile) {
-      pthread_mutex_lock(&detachLogMutex);
-      fprintf(detachLogFile, "[%.3f] STATE %s::%s -> %s (pid=%d, tid=%d, PXN from pid=%d, stateId=%d",
-              currentTime - detachStartTime,
-              event->typeName ? event->typeName : "ncclProfileUnknown",
-              event->func ? event->func : "Unknown",
-              stateName,
-              static_cast<int>(pid),
-              tid,
-              static_cast<int>(event->originPid),
-              static_cast<int>(eState));
-      
-      // Log additional state args
-      if (eStateArgs) {
-        switch (eState) {
-          case ncclProfilerProxyStepSendWait:
-          case ncclProfilerProxyStepRecvFlushWait:
-            fprintf(detachLogFile, ", transSize=%zu", eStateArgs->proxyStep.transSize);
-            break;
-          case ncclProfilerProxyOpInProgress_v4:
-            // ProxyOp progress state for PXN events
-            break;
-          default:
-            break;
-        }
+    // Write state to JSONL immediately
+    std::string details;
+    if (eStateArgs) {
+      switch (eState) {
+        case ncclProfilerProxyStepSendWait:
+        case ncclProfilerProxyStepRecvFlushWait:
+          details = "\"transSize\":" + std::to_string(eStateArgs->proxyStep.transSize);
+          break;
+        default:
+          break;
       }
-      
-      fprintf(detachLogFile, ", event=%p)\n", static_cast<void*>(event));
-      fflush(detachLogFile);
-      pthread_mutex_unlock(&detachLogMutex);
     }
-    
-    // Accumulate state in event buffer (for JSONL output on STOP)
-    // Using dynamic vector - no limit on number of states
-    {
-      StateTransition st;
-      st.timestamp = currentTime;
-      st.stateName = stateName ? stateName : "Unknown";
-      st.stateId = static_cast<int>(eState);
-      st.tid = tid;
-      st.pid = pid;
-      
-      if (eStateArgs) {
-        switch (eState) {
-          case ncclProfilerProxyStepSendWait:
-          case ncclProfilerProxyStepRecvFlushWait:
-            st.details = "\"transSize\":" + std::to_string(eStateArgs->proxyStep.transSize);
-            break;
-          default:
-            break;
-        }
-      }
-      event->states.push_back(std::move(st));
-    }
-    
+    writeJsonlStateRecord(event, currentTime, stateName, static_cast<int>(eState), pid, tid, details);
     return ncclSuccess;
   }
   
@@ -1693,71 +1385,29 @@ ncclResult_t myRecordEventState(void* eHandle,
     return ncclSuccess;  // Drop event if ctx is NULL
   }
   
-  pthread_mutex_lock(&ctx->logMutex);
-  fprintf(ctx->logFile, "[%.3f] STATE %s::%s -> %s (pid=%d, tid=%d, gpu_uuid=%s, stateId=%d",
-          currentTime,
-          event->typeName ? event->typeName : "ncclProfileUnknown",
-          event->func ? event->func : "Unknown",
-          stateName,
-          static_cast<int>(pid),
-          tid,
-          ctx->gpuUuid[0] != '\0' ? ctx->gpuUuid : "unknown",
-          static_cast<int>(eState));
-  
-  // Log additional state args based on state type
-  if (eStateArgs) {
-    switch (eState) {
-      case ncclProfilerProxyStepSendWait:
-      case ncclProfilerProxyStepRecvFlushWait:
-        fprintf(ctx->logFile, ", transSize=%zu", eStateArgs->proxyStep.transSize);
-        break;
-      case ncclProfilerProxyCtrlAppendEnd:
-        fprintf(ctx->logFile, ", appendedProxyOps=%d", eStateArgs->proxyCtrl.appendedProxyOps);
-        break;
-      case ncclProfilerKernelChStop:
-        fprintf(ctx->logFile, ", pTimer=%lu", eStateArgs->kernelCh.pTimer);
-        break;
-      case ncclProfilerNetPluginUpdate:
-        fprintf(ctx->logFile, ", data=%p", eStateArgs->netPlugin.data);
-        break;
-      default:
-        break;
-    }
-  }
-  
-  fprintf(ctx->logFile, ", event=%p, ctx=%p)\n", static_cast<void*>(event), static_cast<void*>(ctx));
-  pthread_mutex_unlock(&ctx->logMutex);
-  
-  // Accumulate state in event buffer (for JSONL output on STOP)
-  // Using dynamic vector - no limit on number of states
+  // Write state to JSONL immediately
   {
-    StateTransition st;
-    st.timestamp = currentTime;
-    st.stateName = stateName ? stateName : "Unknown";
-    st.stateId = static_cast<int>(eState);
-    st.tid = tid;
-    st.pid = pid;
-    
+    std::string details;
     if (eStateArgs) {
       switch (eState) {
         case ncclProfilerProxyStepSendWait:
         case ncclProfilerProxyStepRecvFlushWait:
-          st.details = "\"transSize\":" + std::to_string(eStateArgs->proxyStep.transSize);
+          details = "\"transSize\":" + std::to_string(eStateArgs->proxyStep.transSize);
           break;
         case ncclProfilerProxyCtrlAppendEnd:
-          st.details = "\"appendedProxyOps\":" + std::to_string(eStateArgs->proxyCtrl.appendedProxyOps);
+          details = "\"appendedProxyOps\":" + std::to_string(eStateArgs->proxyCtrl.appendedProxyOps);
           break;
         case ncclProfilerKernelChStop:
-          st.details = "\"pTimer\":" + std::to_string(eStateArgs->kernelCh.pTimer);
+          details = "\"pTimer\":" + std::to_string(eStateArgs->kernelCh.pTimer);
           break;
         case ncclProfilerNetPluginUpdate:
-          st.details = "\"data\":\"" + formatPointerStd(eStateArgs->netPlugin.data) + "\"";
+          details = "\"data\":\"" + formatPointerStd(eStateArgs->netPlugin.data) + "\"";
           break;
         default:
           break;
       }
     }
-    event->states.push_back(std::move(st));
+    writeJsonlStateRecord(event, currentTime, stateName, static_cast<int>(eState), pid, tid, details);
   }
   
   return ncclSuccess;
@@ -1788,20 +1438,7 @@ ncclResult_t myFinalize(void* context) {
   // where another thread might try to validate this context
   unregisterContext(ctx);
   
-  if (ctx->logFile) {
-    pthread_mutex_lock(&ctx->logMutex);
-    fprintf(ctx->logFile, "[%.3f] === Profiler finalized (tid=%d, totalDuration=%.3f us = %.6f s, ctx=%p) ===\n", 
-            endTime, tid, totalDuration, totalDuration / 1e6, static_cast<void*>(ctx));
-    fprintf(ctx->logFile, "Final pool size: %zu chunks, %zu total slots\n", 
-            ctx->pool.chunks.size(), ctx->pool.chunks.size() * ctx->pool.chunkSize);
-    fprintf(ctx->logFile, "Final blacklist size: %zu\n", ctx->blacklist.map.size());
-    fflush(ctx->logFile);
-    fclose(ctx->logFile);
-    pthread_mutex_unlock(&ctx->logMutex);
-  }
-  
-  // Destroy mutexes
-  pthread_mutex_destroy(&ctx->logMutex);
+  // Destroy mutex
   pthread_mutex_destroy(&ctx->allocMutex);
   
   fprintf(stderr, "[MinimalProfiler] Finalized: tid=%d, rank=%d, commId=%lu, final_pool_chunks=%zu, final_pool_slots=%zu, final_blacklist_size=%zu\n", 
@@ -1811,13 +1448,13 @@ ncclResult_t myFinalize(void* context) {
   delete ctx;
   
   // Clean up detach pool when last communicator is finalized
-  pthread_mutex_lock(&processInitMutex);
-  processInitCount--;
-  if (processInitCount == 0) {
-    cleanupDetachPool();
+  pthread_mutex_lock(&processStateMutex);
+  activeContextCount--;
+  if (activeContextCount == 0) {
+    cleanupProcessResources();
     fprintf(stderr, "[MinimalProfiler] Cleanup: detach pool and blacklist freed\n");
   }
-  pthread_mutex_unlock(&processInitMutex);
+  pthread_mutex_unlock(&processStateMutex);
   
   return ncclSuccess;
 }

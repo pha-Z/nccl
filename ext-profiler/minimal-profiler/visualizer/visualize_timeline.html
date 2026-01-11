@@ -320,9 +320,9 @@
                 </select>
             </div>
             <div class="control-group">
-                <label>Filter by GPU Device:</label>
-                <select id="device-filter">
-                    <option value="all">All Devices</option>
+                <label>Filter by GPU UUID:</label>
+                <select id="gpu-filter">
+                    <option value="all">All GPUs</option>
                 </select>
             </div>
             <div class="control-group event-type-group">
@@ -552,20 +552,282 @@
             return normalized;
         }
         
-        // Load events data
+        // Convert JSONL event to old format (for compatibility with existing visualization code)
+        function convertJsonlEvent(jsonlEvent) {
+            // Simplify type name (ncclProfileColl -> Coll)
+            let type = jsonlEvent.type || 'Unknown';
+            let typeName = type;
+            if (type.startsWith('ncclProfile')) {
+                type = type.substring('ncclProfile'.length);
+            }
+            
+            // Convert nested start/stop structure to flat structure
+            const event = {
+                type: type,
+                type_name: typeName,
+                func: jsonlEvent.func || null,
+                start: jsonlEvent.start?.ts ?? null,
+                stop: jsonlEvent.stop?.ts ?? null,
+                start_tid: jsonlEvent.start?.tid ?? null,
+                stop_tid: jsonlEvent.stop?.tid ?? null,
+                start_pid: jsonlEvent.start?.pid ?? null,
+                stop_pid: jsonlEvent.stop?.pid ?? null,
+                rank: jsonlEvent.rank !== undefined ? jsonlEvent.rank : null,
+                commid: jsonlEvent.commId ? String(jsonlEvent.commId) : null,
+                ctx: jsonlEvent.ctx || null,
+                gpuUuid: jsonlEvent.gpuUuid || null,
+                eventAddr: jsonlEvent.eventAddr || null,
+                parentObj: jsonlEvent.parentObj || null,
+                duration: jsonlEvent.duration || null,
+                myPid: jsonlEvent.myPid || null,
+                originPid: jsonlEvent.originPid || null,
+                isPxn: jsonlEvent.isPxn || false,
+                details: jsonlEvent.details || {},
+                states: []
+            };
+            
+            // Extract seq_number from details if present
+            if (event.details.seq !== undefined) {
+                event.seq_number = event.details.seq;
+            }
+            
+            // Convert states array
+            if (jsonlEvent.states && Array.isArray(jsonlEvent.states)) {
+                event.states = jsonlEvent.states.map(state => {
+                    const convertedState = {
+                        timestamp: state.ts ?? null,
+                        state_name: state.name || null,
+                        state_id: state.id ?? null,
+                        tid: state.tid ?? null,
+                        pid: state.pid ?? null,
+                        details: {}
+                    };
+                    
+                    // Extract state-specific details (they're inline JSON properties)
+                    // Copy all properties except the standard ones
+                    for (const [key, value] of Object.entries(state)) {
+                        if (!['ts', 'name', 'id', 'tid', 'pid'].includes(key)) {
+                            convertedState.details[key] = value;
+                        }
+                    }
+                    
+                    return convertedState;
+                });
+            }
+            
+            return event;
+        }
+        
+        // Generate unique ID for an event (similar to Python parser)
+        function generateEventId(event, index) {
+            const eventAddr = event.eventAddr || `event_${index}`;
+            const commid = event.commid || 'unknown';
+            const timestamp = event.start || index;
+            
+            if (event.isPxn && event.originPid) {
+                return `${eventAddr}_PXN_pid${event.myPid}_comm${commid}_${timestamp}`;
+            } else {
+                const rank = event.rank !== null && event.rank !== undefined ? event.rank : 'unknown';
+                return `${eventAddr}_rank${rank}_comm${commid}_${timestamp}`;
+            }
+        }
+        
+        // Load events data from JSONL file
+        // The JSONL format is written directly by the C++ profiler (minimal_profiler.cc)
+        // Records have two types:
+        //   - recordType:"event" - event records (written at STOP time)
+        //   - recordType:"state" - state transition records (written immediately at STATE time)
+        // State records reference their parent event via eventAddr
         async function loadEvents() {
             try {
-                const response = await fetch('events_data.json');
-                eventsData = await response.json();
+                // Load trace.jsonl
+                const jsonlResponse = await fetch('trace.jsonl');
+                if (!jsonlResponse.ok) {
+                    throw new Error('Could not find trace.jsonl. Run merge_traces.py to create it from per-process trace files.');
+                }
                 
-                // Calculate global_min_time from events (self-contained, doesn't rely on parser)
+                const jsonlText = await jsonlResponse.text();
+                const lines = jsonlText.trim().split('\n').filter(line => line.trim());
+                
+                // Two-pass parsing:
+                // Pass 1: Collect event records and state records separately
+                const eventRecords = [];  // {recordType: "event", ...}
+                const stateRecords = [];  // {recordType: "state", eventAddr: "0x...", ...}
+                
+                let errorCount = 0;
+                let nonJsonCount = 0;
+                let parseErrorCount = 0;
+                
+                lines.forEach((line, index) => {
+                    const trimmedLine = line.trim();
+                    
+                    // Skip empty lines silently
+                    if (!trimmedLine) return;
+                    
+                    // Log non-JSON lines
+                    if (!trimmedLine.startsWith('{')) {
+                        nonJsonCount++;
+                        console.error(`Line ${index + 1}: Does not start with '{' - ${trimmedLine}`);
+                        return;
+                    }
+                    
+                    try {
+                        const record = JSON.parse(trimmedLine);
+                        if (record.recordType === 'state') {
+                            stateRecords.push(record);
+                        } else if (record.recordType === 'event' || record.type) {
+                            // Event record (recordType:"event" or has type field)
+                            eventRecords.push({record, index});
+                        }
+                    } catch (e) {
+                        parseErrorCount++;
+                        errorCount++;
+                        console.error(`Line ${index + 1}: JSON parse error - ${e.message}`);
+                        console.error(`  Content: ${trimmedLine}`);
+                    }
+                });
+                
+                // Log summary
+                if (nonJsonCount > 0 || parseErrorCount > 0) {
+                    console.error(`\n=== JSONL Parsing Errors Summary ===`);
+                    console.error(`Total lines processed: ${lines.length}`);
+                    console.error(`Non-JSON lines (not starting with '{'): ${nonJsonCount}`);
+                    console.error(`JSON parse errors: ${parseErrorCount}`);
+                    console.error(`Total errors: ${nonJsonCount + parseErrorCount}`);
+                    console.error(`Successfully parsed: ${eventRecords.length} events, ${stateRecords.length} states`);
+                }
+                
+                // Group states by eventAddr for fast lookup
+                const statesByEventAddr = new Map();
+                stateRecords.forEach(state => {
+                    if (state.eventAddr) {
+                        if (!statesByEventAddr.has(state.eventAddr)) {
+                            statesByEventAddr.set(state.eventAddr, []);
+                        }
+                        statesByEventAddr.get(state.eventAddr).push(state);
+                    }
+                });
+                
+                // Pass 2: Convert events and attach states
+                const events = {};
+                const ranks = new Set();
+                const contexts = new Set();
+                const threads = new Set();
+                const pids = new Set();
+                const commids = new Set();
+                const gpuUuids = new Set();
+                
+                eventRecords.forEach(({record, index}) => {
+                    // Attach states to this event before conversion
+                    const eventAddr = record.eventAddr;
+                    if (eventAddr && statesByEventAddr.has(eventAddr)) {
+                        // Sort states by timestamp
+                        const states = statesByEventAddr.get(eventAddr)
+                            .sort((a, b) => (a.ts || 0) - (b.ts || 0))
+                            .map(s => ({
+                                ts: s.ts,
+                                name: s.name,
+                                id: s.id,
+                                tid: s.tid,
+                                pid: s.pid,
+                                // Copy extra fields (transSize, etc.)
+                                ...Object.fromEntries(
+                                    Object.entries(s).filter(([k]) => 
+                                        !['recordType', 'eventAddr', 'ts', 'name', 'id', 'tid', 'pid'].includes(k)
+                                    )
+                                )
+                            }));
+                        record.states = states;
+                    } else {
+                        record.states = record.states || [];
+                    }
+                    
+                    const event = convertJsonlEvent(record);
+                    const eventId = generateEventId(event, index);
+                    
+                    events[eventId] = event;
+                    
+                    // Collect metadata
+                    if (event.rank !== null && event.rank !== undefined) ranks.add(event.rank);
+                    if (event.ctx) contexts.add(event.ctx);
+                    if (event.start_tid !== null) threads.add(event.start_tid);
+                    if (event.stop_tid !== null) threads.add(event.stop_tid);
+                    if (event.start_pid !== null) pids.add(event.start_pid);
+                    if (event.stop_pid !== null) pids.add(event.stop_pid);
+                    if (event.commid) commids.add(event.commid);
+                    if (event.gpuUuid) gpuUuids.add(event.gpuUuid);
+                    event.states.forEach(state => {
+                        if (state.tid !== null) threads.add(state.tid);
+                        if (state.pid !== null) pids.add(state.pid);
+                    });
+                });
+                
+                console.log(`Loaded ${eventRecords.length} events and ${stateRecords.length} state records`);
+                
+                // Build parent-child maps from parentObj
+                const eventByAddr = new Map();
+                Object.entries(events).forEach(([key, event]) => {
+                    if (event.eventAddr) {
+                        if (!eventByAddr.has(event.eventAddr)) {
+                            eventByAddr.set(event.eventAddr, []);
+                        }
+                        eventByAddr.get(event.eventAddr).push({key, event});
+                    }
+                });
+                
+                const parent_child_map = {};
+                const event_to_parent = {};
+                
+                Object.entries(events).forEach(([key, event]) => {
+                    if (event.parentObj && event.parentObj !== 'null' && event.parentObj !== null) {
+                        // Find parent event(s) with matching eventAddr
+                        const candidates = eventByAddr.get(event.parentObj) || [];
+                        
+                        if (candidates.length > 0) {
+                            // Filter to valid parents (started before or at child start time)
+                            const childStart = event.start;
+                            const validParents = candidates
+                                .filter(({event: parentEvent}) => {
+                                    if (parentEvent.start === null) return false;
+                                    if (childStart === null) return true;
+                                    return parentEvent.start <= childStart;
+                                })
+                                .sort((a, b) => (b.event.start || 0) - (a.event.start || 0)); // Most recent first
+                            
+                            if (validParents.length > 0) {
+                                const parent = validParents[0];
+                                event_to_parent[key] = parent.key;
+                                if (!parent_child_map[parent.key]) {
+                                    parent_child_map[parent.key] = [];
+                                }
+                                parent_child_map[parent.key].push(key);
+                            }
+                        }
+                    }
+                });
+                
+                // Build eventsData structure
+                eventsData = {
+                    events: events,
+                    ranks: Array.from(ranks).sort((a, b) => a - b),
+                    contexts: Array.from(contexts).sort(),
+                    threads: Array.from(threads).sort((a, b) => a - b),
+                    pids: Array.from(pids).sort((a, b) => a - b),
+                    commids: Array.from(commids).sort(),
+                    gpuUuids: Array.from(gpuUuids).sort(), // New: GPU UUIDs
+                    parent_child_map: parent_child_map,
+                    event_to_parent: event_to_parent,
+                    total_events: Object.keys(events).length
+                };
+                
+                // Calculate global_min_time from events
                 calculateGlobalMinTime();
                 
                 initializeFilters();
                 applyFilters(); // This will set filteredEvents and render the timeline
             } catch (error) {
                 document.getElementById('timeline-container').innerHTML = 
-                    '<div class="loading" style="color: #f48771;">Error loading events_data.json. Please run parse_logs.py first.</div>';
+                    '<div class="loading" style="color: #f48771;">Error loading trace.jsonl: ' + error.message + '</div>';
                 console.error('Error loading events:', error);
             }
         }
@@ -672,25 +934,26 @@
                 });
             }
             
-            // Populate GPU device filter
-            // Use device_ids from parser if available, otherwise extract from events
-            const deviceFilter = document.getElementById('device-filter');
-            let device_ids = eventsData.device_ids || [];
-            if (device_ids.length === 0) {
-                const deviceSet = new Set();
+            // Populate GPU UUID filter
+            const gpuFilter = document.getElementById('gpu-filter');
+            let gpuUuids = eventsData.gpuUuids || [];
+            if (gpuUuids.length === 0) {
+                const gpuSet = new Set();
                 Object.values(eventsData.events || {}).forEach(event => {
-                    if (event.device_id !== undefined && event.device_id !== null) {
-                        deviceSet.add(event.device_id);
+                    if (event.gpuUuid) {
+                        gpuSet.add(event.gpuUuid);
                     }
                 });
-                device_ids = Array.from(deviceSet).sort((a, b) => a - b);
+                gpuUuids = Array.from(gpuSet).sort();
             }
-            if (device_ids.length > 0) {
-                device_ids.forEach(deviceId => {
+            if (gpuUuids.length > 0) {
+                gpuUuids.forEach(gpuUuid => {
                     const option = document.createElement('option');
-                    option.value = deviceId;
-                    option.textContent = `GPU ${deviceId}`;
-                    deviceFilter.appendChild(option);
+                    option.value = gpuUuid;
+                    // Show shortened UUID for readability
+                    const shortUuid = gpuUuid.length > 20 ? gpuUuid.substring(0, 20) + '...' : gpuUuid;
+                    option.textContent = shortUuid;
+                    gpuFilter.appendChild(option);
                 });
             }
             
@@ -797,7 +1060,7 @@
             threadFilter.addEventListener('change', applyFilters);
             pidFilter.addEventListener('change', applyFilters);
             commidFilter.addEventListener('change', applyFilters);
-            document.getElementById('device-filter').addEventListener('change', applyFilters);
+            document.getElementById('gpu-filter').addEventListener('change', applyFilters);
             // Type filter checkboxes already have event listeners attached above
             document.getElementById('time-min').addEventListener('input', applyFilters);
             document.getElementById('time-max').addEventListener('input', applyFilters);
@@ -865,7 +1128,7 @@
             const threadFilter = document.getElementById('thread-filter').value;
             const pidFilter = document.getElementById('pid-filter').value;
             const commidFilter = document.getElementById('commid-filter').value;
-            const deviceFilter = document.getElementById('device-filter').value;
+            const gpuFilter = document.getElementById('gpu-filter').value;
             let timeMin = parseFloat(document.getElementById('time-min').value) || null;
             let timeMax = parseFloat(document.getElementById('time-max').value) || null;
             
@@ -914,8 +1177,8 @@
                 // Communicator filter
                 if (commidFilter !== 'all' && event.commid !== commidFilter) return false;
                 
-                // GPU device filter (matches rank filter pattern)
-                if (deviceFilter !== 'all' && event.device_id !== parseInt(deviceFilter)) return false;
+                // GPU UUID filter
+                if (gpuFilter !== 'all' && event.gpuUuid !== gpuFilter) return false;
                 
                 if (selectedTypes.size > 0 && !selectedTypes.has(event.type)) return false;
                 
