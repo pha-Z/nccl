@@ -323,7 +323,7 @@ struct EventPool {
     chunks.push_back(newChunk);
     inUseChunks.push_back(newInUse);
     
-    fprintf(stderr, "[MinimalProfiler] INFO: Event pool grown: added chunk %zu (total chunks: %zu, total slots: %zu)\n",
+    fprintf(stdout, "[MinimalProfiler] INFO: Event pool grown: added chunk %zu (total chunks: %zu, total slots: %zu)\n",
             chunks.size() - 1, chunks.size(), chunks.size() * chunkSize);
     
     return true;
@@ -719,7 +719,7 @@ static bool initSharedJsonlFile(const char* dirname) {
     return false;
   }
   
-  fprintf(stderr, "[MinimalProfiler] JSONL trace file: %s\n", sharedJsonlPath);
+  fprintf(stdout, "[MinimalProfiler] JSONL trace file: %s\n", sharedJsonlPath);
   return true;
 }
 
@@ -819,7 +819,7 @@ static void writeJsonlStateRecord(MyEvent* event, double timestamp, const char* 
   }
   json += "}\n";
   
-  // Write directly to per-process file (no cross-process coordination needed)
+  // Write to per-process file
   pthread_mutex_lock(&jsonlFileMutex);
   if (sharedJsonlFile) {
     int fd = fileno(sharedJsonlFile);
@@ -881,7 +881,7 @@ static void writeJsonlEventRecord(MyEvent* event, double endTime, double duratio
   // Add details (no states array - states are separate records)
   json += ",\"details\":{" + event->startDetails + "}}\n";
   
-  // Write directly to per-process file (no cross-process coordination needed)
+  // Write to per-process file
   pthread_mutex_lock(&jsonlFileMutex);
   if (sharedJsonlFile) {
     int fd = fileno(sharedJsonlFile);
@@ -921,7 +921,7 @@ static void writeJsonlLifecycleEvent(const char* action, double timestamp,
                      ",\"states\":[]" +
                      ",\"details\":{" + detailsJson + "}}\n";
   
-  // Write directly to per-process file (no cross-process coordination needed)
+  // Write to per-process file
   pthread_mutex_lock(&jsonlFileMutex);
   if (sharedJsonlFile) {
     int fd = fileno(sharedJsonlFile);
@@ -1005,7 +1005,7 @@ ncclResult_t myInit(void** context, uint64_t commId, int* eActivationMask,
   *eActivationMask = mask;
   pid_t tid = getTid();
   
-  fprintf(stderr, "[MinimalProfiler] Init called: tid=%d, rank=%d/%d, commId=%lu, eventMask=0x%x\n",
+  fprintf(stdout, "[MinimalProfiler] Init called: tid=%d, rank=%d/%d, commId=%lu, eventMask=0x%x\n",
           tid, rank, nranks, commId, mask);
   
   // Get dump directory name (needed for JSONL trace file)
@@ -1026,7 +1026,7 @@ ncclResult_t myInit(void** context, uint64_t commId, int* eActivationMask,
     firstCommId = commId;  // Store commId for this profiler instance
     
     if (initPxnDetachPool()) {
-      fprintf(stderr, "[MinimalProfiler] Init: profilerPid=%d, firstCommId=%lu\n",
+      fprintf(stdout, "[MinimalProfiler] Init: profilerPid=%d, firstCommId=%lu\n",
               static_cast<int>(profilerPid), firstCommId);
     } else {
       fprintf(stderr, "[MinimalProfiler] WARNING: Failed to initialize detach pool\n");
@@ -1034,7 +1034,7 @@ ncclResult_t myInit(void** context, uint64_t commId, int* eActivationMask,
     
     // Initialize per-process JSONL trace file
     if (initSharedJsonlFile(dirname)) {
-      fprintf(stderr, "[MinimalProfiler] JSONL trace file initialized\n");
+      fprintf(stdout, "[MinimalProfiler] JSONL trace file initialized\n");
     } else {
       fprintf(stderr, "[MinimalProfiler] WARNING: Failed to initialize JSONL file\n");
     }
@@ -1084,7 +1084,7 @@ ncclResult_t myInit(void** context, uint64_t commId, int* eActivationMask,
     return ncclSystemError;
   }
   
-  fprintf(stderr, "[MinimalProfiler] Successfully initialized: tid=%d, rank=%d, commId=%lu, pool_size=%zu\n", 
+  fprintf(stdout, "[MinimalProfiler] Successfully initialized: tid=%d, rank=%d, commId=%lu, pool_size=%zu\n", 
           tid, rank, commId, INITIAL_POOL_SIZE);
   
   // Register this context in the process-wide registry for PXN validation
@@ -1441,7 +1441,7 @@ ncclResult_t myFinalize(void* context) {
   // Destroy mutex
   pthread_mutex_destroy(&ctx->allocMutex);
   
-  fprintf(stderr, "[MinimalProfiler] Finalized: tid=%d, rank=%d, commId=%lu, final_pool_chunks=%zu, final_pool_slots=%zu, final_blacklist_size=%zu\n", 
+  fprintf(stdout, "[MinimalProfiler] Finalized: tid=%d, rank=%d, commId=%lu, final_pool_chunks=%zu, final_pool_slots=%zu, final_blacklist_size=%zu\n", 
           tid, ctx->rank, ctx->commId, ctx->pool.chunks.size(), 
           ctx->pool.chunks.size() * ctx->pool.chunkSize, ctx->blacklist.map.size());
   
@@ -1452,7 +1452,7 @@ ncclResult_t myFinalize(void* context) {
   activeContextCount--;
   if (activeContextCount == 0) {
     cleanupProcessResources();
-    fprintf(stderr, "[MinimalProfiler] Cleanup: detach pool and blacklist freed\n");
+    fprintf(stdout, "[MinimalProfiler] Cleanup: detach pool and blacklist freed\n");
   }
   pthread_mutex_unlock(&processStateMutex);
   
