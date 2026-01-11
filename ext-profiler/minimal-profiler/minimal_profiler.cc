@@ -918,7 +918,6 @@ static void writeJsonlLifecycleEvent(const char* action, double timestamp,
                      ",\"tid\":" + std::to_string(static_cast<int>(tid)) + "}" +
                      ",\"duration\":0.0" +
                      ",\"myPid\":" + std::to_string(static_cast<int>(profilerPid)) +
-                     ",\"states\":[]" +
                      ",\"details\":{" + detailsJson + "}}\n";
   
   // Write to per-process file

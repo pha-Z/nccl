@@ -355,6 +355,10 @@
                 <label for="show-collective-lines">Show Collective Connections</label>
             </div>
             <div class="control-group checkbox-option">
+                <input type="checkbox" id="show-profiler-lifecycle-lines" checked>
+                <label for="show-profiler-lifecycle-lines">Show Profiler Lifecycle Connections</label>
+            </div>
+            <div class="control-group checkbox-option">
                 <input type="checkbox" id="group-by-type" checked>
                 <label for="group-by-type">Allow Multiple Events per Lane (same type)</label>
             </div>
@@ -500,6 +504,7 @@
         let highlightedStateIndex = null; // Track clicked/highlighted state's index within event
         let showParentArrows = true;
         let showCollectiveLines = true;
+        let showProfilerLifecycleLines = true;
         let groupByType = true; // Default to new mode (group by rank+type)
         let normalizeTime = true; // Default to normalized timeline (start at 0)
         let isSelecting = false;
@@ -589,6 +594,12 @@
             // Extract seq_number from details if present
             if (event.details.seq !== undefined) {
                 event.seq_number = event.details.seq;
+            }
+            
+            // Extract func from details if not present at top level
+            // Some events (like CollApi, Coll) store func in details.func
+            if (!event.func && event.details.func !== undefined) {
+                event.func = event.details.func;
             }
             
             // Convert states array
@@ -717,11 +728,17 @@
                 const commids = new Set();
                 const gpuUuids = new Set();
                 
+                // Statistics for state attachment
+                let eventsWithStates = 0;
+                let totalStatesAttached = 0;
+                
                 eventRecords.forEach(({record, index}) => {
-                    // Attach states to this event before conversion
+                    // Attach separate state records to this event before conversion
+                    // States are written as separate JSONL records with recordType:"state"
+                    // and reference their parent event via eventAddr
                     const eventAddr = record.eventAddr;
                     if (eventAddr && statesByEventAddr.has(eventAddr)) {
-                        // Sort states by timestamp
+                        // Sort states by timestamp and convert to event format
                         const states = statesByEventAddr.get(eventAddr)
                             .sort((a, b) => (a.ts || 0) - (b.ts || 0))
                             .map(s => ({
@@ -730,7 +747,7 @@
                                 id: s.id,
                                 tid: s.tid,
                                 pid: s.pid,
-                                // Copy extra fields (transSize, etc.)
+                                // Copy extra fields (transSize, appendedProxyOps, etc.)
                                 ...Object.fromEntries(
                                     Object.entries(s).filter(([k]) => 
                                         !['recordType', 'eventAddr', 'ts', 'name', 'id', 'tid', 'pid'].includes(k)
@@ -738,8 +755,10 @@
                                 )
                             }));
                         record.states = states;
+                        eventsWithStates++;
+                        totalStatesAttached += states.length;
                     } else {
-                        record.states = record.states || [];
+                        record.states = [];
                     }
                     
                     const event = convertJsonlEvent(record);
@@ -763,6 +782,26 @@
                 });
                 
                 console.log(`Loaded ${eventRecords.length} events and ${stateRecords.length} state records`);
+                console.log(`State attachment: ${eventsWithStates} events have states (${totalStatesAttached} total states attached)`);
+                
+                // Check for orphan states (states without eventAddr) and unmatched states
+                const orphanStates = stateRecords.filter(s => !s.eventAddr);
+                if (orphanStates.length > 0) {
+                    console.warn(`Warning: ${orphanStates.length} state records have no eventAddr and were not attached to any event`);
+                }
+                
+                // Check for states that reference events that don't exist
+                const unmatchedStateAddrs = new Set();
+                statesByEventAddr.forEach((states, eventAddr) => {
+                    // Check if any event has this eventAddr
+                    const hasMatchingEvent = eventRecords.some(({record}) => record.eventAddr === eventAddr);
+                    if (!hasMatchingEvent) {
+                        unmatchedStateAddrs.add(eventAddr);
+                    }
+                });
+                if (unmatchedStateAddrs.size > 0) {
+                    console.warn(`Warning: ${unmatchedStateAddrs.size} event addresses referenced by states don't match any event:`, Array.from(unmatchedStateAddrs).slice(0, 10));
+                }
                 
                 // Build parent-child maps from parentObj
                 const eventByAddr = new Map();
@@ -1078,6 +1117,10 @@
             });
             document.getElementById('show-collective-lines').addEventListener('change', (e) => {
                 showCollectiveLines = e.target.checked;
+                renderTimeline();
+            });
+            document.getElementById('show-profiler-lifecycle-lines').addEventListener('change', (e) => {
+                showProfilerLifecycleLines = e.target.checked;
                 renderTimeline();
             });
             document.getElementById('group-by-type').addEventListener('change', (e) => {
@@ -1554,7 +1597,9 @@
                 if (event.seq_number !== undefined && event.seq_number !== null && event.commid) {
                     // Group by commid, seq_number, function name (e.g. AllReduce), and event type
                     // This ensures we connect the same collective operation across ranks
-                    const groupKey = `${event.commid}_${event.seq_number}_${event.func}_${event.type}`;
+                    // Use empty string for null/undefined func to ensure consistent grouping
+                    const funcName = event.func || '';
+                    const groupKey = `${event.commid}_${event.seq_number}_${funcName}_${event.type}`;
                     if (!collectives.has(groupKey)) {
                         collectives.set(groupKey, []);
                     }
@@ -1600,6 +1645,67 @@
                 }
                 ctx.stroke();
             }
+            ctx.restore();
+        }
+        
+        function drawProfilerLifecycleConnections(renderedEventsMap, eventToLane) {
+            const lifecyclePairs = new Map();
+            
+            // Group rendered ProfilerLifecycle events by commId and rank
+            for (const [key, event] of renderedEventsMap.entries()) {
+                // Only consider ProfilerLifecycle events
+                if (event.type === 'ProfilerLifecycle' && event.func && event.commid !== undefined && event.rank !== undefined) {
+                    // Create a key based on commId and rank to pair init and finalize
+                    const pairKey = `${event.commid}_${event.rank}`;
+                    
+                    if (!lifecyclePairs.has(pairKey)) {
+                        lifecyclePairs.set(pairKey, { init: null, finalize: null });
+                    }
+                    
+                    const pair = lifecyclePairs.get(pairKey);
+                    if (event.func === 'ProfilerInit' || event.func === 'profilerInit') {
+                        pair.init = { key, event };
+                    } else if (event.func === 'ProfilerFinalize' || event.func === 'profilerFinalize' || event.func === 'finalize') {
+                        pair.finalize = { key, event };
+                    }
+                }
+            }
+            
+            ctx.save();
+            ctx.globalAlpha = 0.6;
+            ctx.strokeStyle = '#858585'; // Grey for profiler lifecycle connections
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([3, 3]); // Dashed line to distinguish from collective connections
+            
+            for (const [pairKey, pair] of lifecyclePairs.entries()) {
+                // Only draw if we have both init and finalize
+                if (pair.init && pair.finalize) {
+                    const initLane = eventToLane.get(pair.init.key);
+                    const finalizeLane = eventToLane.get(pair.finalize.key);
+                    
+                    if (initLane === undefined || finalizeLane === undefined) continue;
+                    
+                    const initY = 40 + initLane * laneHeight + laneHeight / 2;
+                    const finalizeY = 40 + finalizeLane * laneHeight + laneHeight / 2;
+                    
+                    // Use center of the event bar for connection points
+                    const initX = pair.init.event._bounds.startX !== undefined && pair.init.event._bounds.endX !== undefined
+                        ? (pair.init.event._bounds.startX + pair.init.event._bounds.endX) / 2
+                        : (pair.init.event._bounds.startX || pair.init.event._bounds.endX || 0);
+                    
+                    const finalizeX = pair.finalize.event._bounds.startX !== undefined && pair.finalize.event._bounds.endX !== undefined
+                        ? (pair.finalize.event._bounds.startX + pair.finalize.event._bounds.endX) / 2
+                        : (pair.finalize.event._bounds.startX || pair.finalize.event._bounds.endX || 0);
+                    
+                    // Draw line connecting init to finalize
+                    ctx.beginPath();
+                    ctx.moveTo(initX, initY);
+                    ctx.lineTo(finalizeX, finalizeY);
+                    ctx.stroke();
+                }
+            }
+            
+            ctx.setLineDash([]); // Reset line dash
             ctx.restore();
         }
         
@@ -1992,6 +2098,11 @@
                 drawCollectiveConnections(renderedEventsMap, eventToLane);
             }
             
+            // Draw profiler lifecycle connections (connecting init and finalize events)
+            if (showProfilerLifecycleLines) {
+                drawProfilerLifecycleConnections(renderedEventsMap, eventToLane);
+            }
+            
             // Draw selection rectangle if selecting
             if (isSelecting) {
                 const selStartX = Math.min(selectionStartX, selectionEndX);
@@ -2313,6 +2424,22 @@
                 lines.push(`Context: ${event.ctx}`);
             }
             
+            // GPU UUID
+            if (event.gpuUuid) {
+                lines.push(`GPU UUID: ${event.gpuUuid}`);
+            }
+            
+            // PXN (Proxy Network) information
+            if (event.isPxn) {
+                lines.push(`<strong style="color: #f48771;">PXN Event</strong>`);
+                if (event.myPid !== undefined && event.myPid !== null) {
+                    lines.push(`  My PID: ${event.myPid}`);
+                }
+                if (event.originPid !== undefined && event.originPid !== null) {
+                    lines.push(`  Origin PID: ${event.originPid}`);
+                }
+            }
+            
             // Thread IDs
             if (event.start_tid !== undefined && event.start_tid !== null) {
                 if (event.stop_tid !== undefined && event.stop_tid !== null && event.start_tid !== event.stop_tid) {
@@ -2339,8 +2466,13 @@
                 lines.push(`Process ID (stop): ${event.stop_pid}`);
             }
             
-            if (event.event_addr) {
-                lines.push(`Event Address: ${event.event_addr}`);
+            if (event.eventAddr) {
+                lines.push(`Event Address: ${event.eventAddr}`);
+            }
+            
+            // Parent object address (if different from parent event's address)
+            if (event.parentObj && event.parentObj !== 'null' && event.parentObj !== null) {
+                lines.push(`Parent Object Address: ${event.parentObj}`);
             }
             
             // Timestamps
@@ -2351,8 +2483,16 @@
                 lines.push(`Stop Time: ${event.stop.toFixed(3)}μs`);
             }
             if (event.start !== null && event.stop !== null) {
-                const duration = event.stop - event.start;
-                lines.push(`Duration: ${duration.toFixed(3)}μs (${(duration / 1000).toFixed(3)}ms)`);
+                const calculatedDuration = event.stop - event.start;
+                lines.push(`Duration: ${calculatedDuration.toFixed(3)}μs (${(calculatedDuration / 1000).toFixed(3)}ms)`);
+                // Also show stored duration if it exists and differs significantly
+                if (event.duration !== null && event.duration !== undefined && 
+                    Math.abs(event.duration - calculatedDuration) > 0.001) {
+                    lines.push(`  (Stored duration: ${event.duration.toFixed(3)}μs)`);
+                }
+            } else if (event.duration !== null && event.duration !== undefined) {
+                // Show stored duration if start/stop are missing
+                lines.push(`Duration: ${event.duration.toFixed(3)}μs (${(event.duration / 1000).toFixed(3)}ms) [from stored field]`);
             }
             
             // All event details (from log file)
@@ -2380,6 +2520,9 @@
                         lines.push(`  Function: ${parentEvent.func}`);
                     }
                     lines.push(`  Rank: ${parentEvent.rank}`);
+                    if (parentEvent.eventAddr) {
+                        lines.push(`  Address: ${parentEvent.eventAddr}`);
+                    }
                 }
             }
             
@@ -2390,7 +2533,8 @@
                 children.forEach((childId, idx) => {
                     const childEvent = eventsData.events[childId];
                     if (childEvent) {
-                        lines.push(`  ${idx + 1}. ${childEvent.type_name || childEvent.type || 'Unknown'}`);
+                        const childAddr = childEvent.eventAddr ? ` (${childEvent.eventAddr})` : '';
+                        lines.push(`  ${idx + 1}. ${childEvent.type_name || childEvent.type || 'Unknown'}${childAddr}`);
                         if (childEvent.func) {
                             lines.push(`     Function: ${childEvent.func}`);
                         }
