@@ -643,6 +643,45 @@
             }
         }
         
+        // Helper function to determine which event type a state belongs to based on state name
+        // This prevents mismatched states from being attached to wrong events due to address reuse
+        function getEventTypeForState(stateName) {
+            if (!stateName) return null;
+            
+            // ProxyStep states belong to ncclProfileProxyStep events
+            if (stateName.startsWith('ProxyStep')) {
+                return 'ncclProfileProxyStep';
+            }
+            
+            // ProxyCtrl states belong to ncclProfileProxyCtrl events
+            if (stateName.startsWith('ProxyCtrl')) {
+                return 'ncclProfileProxyCtrl';
+            }
+            
+            // ProxyOp states belong to ncclProfileProxyOp events
+            if (stateName.startsWith('ProxyOp')) {
+                return 'ncclProfileProxyOp';
+            }
+            
+            // NetPluginUpdate belongs to ncclProfileNetPlugin events
+            if (stateName === 'NetPluginUpdate') {
+                return 'ncclProfileNetPlugin';
+            }
+            
+            // KernelChStop belongs to ncclProfileKernelCh events
+            if (stateName === 'KernelChStop') {
+                return 'ncclProfileKernelCh';
+            }
+            
+            // GroupApi states belong to ncclProfileGroupApi events
+            if (stateName === 'EndGroupApiStart' || stateName === 'BeginGroupApiEnd' || 
+                stateName === 'GroupStartApiStop' || stateName === 'GroupEndApiStart') {
+                return 'ncclProfileGroupApi';
+            }
+            
+            return null; // Unknown state type
+        }
+        
         // Load events data from JSONL file
         // The JSONL format is written directly by the C++ profiler (minimal_profiler.cc)
         // Records have two types:
@@ -738,8 +777,38 @@
                     // and reference their parent event via eventAddr
                     const eventAddr = record.eventAddr;
                     if (eventAddr && statesByEventAddr.has(eventAddr)) {
+                        // Get event type and time bounds for filtering
+                        // This handles address reuse - same eventAddr might be used by multiple events
+                        const eventType = record.type || null;
+                        const eventStart = record.start?.ts ?? null;
+                        const eventStop = record.stop?.ts ?? null;
+                        
+                        // Filter states by both type and timestamp to handle address reuse
+                        let candidateStates = statesByEventAddr.get(eventAddr);
+                        
+                        // First, filter by event type - states must belong to the correct event type
+                        if (eventType) {
+                            candidateStates = candidateStates.filter(s => {
+                                const expectedEventType = getEventTypeForState(s.name);
+                                // If we can determine the expected event type, it must match
+                                // If we can't determine it (null), allow it (unknown states)
+                                return expectedEventType === null || expectedEventType === eventType;
+                            });
+                        }
+                        
+                        // Then, filter by timestamp if event has both start and stop
+                        if (eventStart !== null && eventStop !== null) {
+                            // Event has both start and stop - filter states within this range
+                            candidateStates = candidateStates.filter(s => {
+                                const stateTime = s.ts || 0;
+                                return stateTime >= eventStart && stateTime <= eventStop;
+                            });
+                        }
+                        // If event has incomplete bounds (only start or only stop, or neither),
+                        // we rely on type-based filtering only to avoid false matches
+                        
                         // Sort states by timestamp and convert to event format
-                        const states = statesByEventAddr.get(eventAddr)
+                        const states = candidateStates
                             .sort((a, b) => (a.ts || 0) - (b.ts || 0))
                             .map(s => ({
                                 ts: s.ts,
@@ -755,8 +824,10 @@
                                 )
                             }));
                         record.states = states;
-                        eventsWithStates++;
-                        totalStatesAttached += states.length;
+                        if (states.length > 0) {
+                            eventsWithStates++;
+                            totalStatesAttached += states.length;
+                        }
                     } else {
                         record.states = [];
                     }
@@ -1834,12 +1905,32 @@
                     stateLineWidth = 3;
                 }
                 
-                // Check if this state is within the event bounds
-                const isWithinEvent = (event.start !== null && state.timestamp >= event.start) ||
-                                    (event.stop !== null && state.timestamp <= event.stop);
+                // Check if this state is within the actual drawn event bounds
+                // For events with both start and stop, check against actual timestamps
+                // For events with incomplete bounds, check if state is near the drawn element
+                let isWithinEvent = false;
+                if (event.start !== null && event.stop !== null) {
+                    // Full bar: state must be between start and stop
+                    isWithinEvent = state.timestamp >= event.start && state.timestamp <= event.stop;
+                } else if (event.start !== null) {
+                    // Right-pointing triangle: state should be near start (within a small window)
+                    const window = (maxTime - minTime) * 0.01; // 1% of total time range
+                    isWithinEvent = state.timestamp >= event.start && state.timestamp <= event.start + window;
+                } else if (event.stop !== null) {
+                    // Left-pointing triangle: state should be near stop (within a small window)
+                    const window = (maxTime - minTime) * 0.01; // 1% of total time range
+                    isWithinEvent = state.timestamp <= event.stop && state.timestamp >= event.stop - window;
+                } else {
+                    // Circle/dot: state should be near the first state (within a small window)
+                    if (event.states.length > 0) {
+                        const firstStateTime = event.states[0].timestamp;
+                        const window = (maxTime - minTime) * 0.01; // 1% of total time range
+                        isWithinEvent = Math.abs(state.timestamp - firstStateTime) <= window;
+                    }
+                }
                 
-                if (!isWithinEvent || event.start === null || event.stop === null) {
-                    // 5a. SPEECH BUBBLE - Standalone state or state outside event bounds
+                if (!isWithinEvent) {
+                    // 5a. SPEECH BUBBLE - State outside event bounds
                     const bubbleSize = isStateHighlighted ? 10 : 8; // Slightly larger when highlighted
                     const bubbleY = centerY - bubbleSize;
                     
