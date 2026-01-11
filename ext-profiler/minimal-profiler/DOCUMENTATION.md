@@ -1,45 +1,108 @@
 # minimal_profiler.cc Documentation
 
+## Documentation Style Guide
+
+When contributing to this documentation, use a **Reason-First** writing style. Explain not just **what** something is or does, but **why** it’s designed that way. Include the rationale—use words like **because**, **since**, and **so that**—to capture constraints, tradeoffs, and intent, such that future maintainers can understand the design decisions rather than only the implementation details.
+
+**Example (State-only):**
+> The profiler uses a blacklist to track parent event pointers.
+
+**Example (Reason-First):**
+> The profiler uses a blacklist to track parent event pointers **because** pointer addresses may be reused by the system allocator. By blacklisting active parent addresses, we ensure they are not reassigned to new events **such that** the parent-child hierarchy remains consistent in the trace.
+
+This ensures that future maintainers understand the constraints and intent behind the design, rather than just the implementation details.
+
+---
+
 ## Table of Contents
 
 ### 1. Overview
-   - 1.1 What the Profiler Does
-   - 1.2 The NCCL Profiler API
+   - [1.1 What the Profiler Does](#11-what-the-profiler-does)
+   - [1.2 The NCCL Profiler API](#12-the-nccl-profiler-api)
 
 ### 2. Event Tracking
-   - 2.1 Event Lifecycle
-   - 2.2 Parent-Child Relationships
-   - 2.3 Dealing with Address Reuse
-      - 2.3.1 The Problem
-      - 2.3.2 Memory Pools
-      - 2.3.3 Blacklisting
-      - 2.3.4 How Pools and Blacklist Work Together
-   - 2.4 Cross-Process Events (PXN)
-      - 2.4.1 What is PXN Routing
-      - 2.4.2 The Invalid Pointer Problem
-      - 2.4.3 Context Validation
-      - 2.4.4 The Detach Pool
+- [minimal\_profiler.cc Documentation](#minimal_profilercc-documentation)
+  - [Documentation Style Guide](#documentation-style-guide)
+  - [Table of Contents](#table-of-contents)
+    - [1. Overview](#1-overview)
+    - [2. Event Tracking](#2-event-tracking)
+    - [3. GPU Identification](#3-gpu-identification)
+    - [4. Communicator Information](#4-communicator-information)
+    - [5. Process and Thread Tracking](#5-process-and-thread-tracking)
+    - [6. Tracing](#6-tracing)
+    - [7. Thread Safety](#7-thread-safety)
+    - [8. Reference](#8-reference)
+  - [1. Overview](#1-overview-1)
+    - [1.1 What the Profiler Does](#11-what-the-profiler-does)
+    - [1.2 The NCCL Profiler API](#12-the-nccl-profiler-api)
+  - [2. Event Tracking](#2-event-tracking-1)
+    - [2.1 Event Lifecycle](#21-event-lifecycle)
+    - [2.2 Parent-Child Relationships](#22-parent-child-relationships)
+    - [2.3 Dealing with Address Reuse](#23-dealing-with-address-reuse)
+      - [2.3.1 The Problem](#231-the-problem)
+      - [2.3.2 Memory Pools](#232-memory-pools)
+      - [2.3.3 Blacklisting](#233-blacklisting)
+      - [2.3.4 How Pools and Blacklist Work Together](#234-how-pools-and-blacklist-work-together)
+    - [2.4 Cross-Process Events (PXN)](#24-cross-process-events-pxn)
+      - [2.4.1 What is PXN Routing](#241-what-is-pxn-routing)
+      - [2.4.2 The Invalid Pointer Problem](#242-the-invalid-pointer-problem)
+      - [2.4.3 Context Validation](#243-context-validation)
+      - [2.4.4 The PXN Detach Pool](#244-the-pxn-detach-pool)
+      - [2.4.5 Parent-Child Reference Handling with PXN](#245-parent-child-reference-handling-with-pxn)
+    - [2.5 CUPTI Correlation Tracking](#25-cupti-correlation-tracking)
+      - [2.5.1 Why Correlate NCCL Events with CUDA Kernels](#251-why-correlate-nccl-events-with-cuda-kernels)
+      - [2.5.2 External Correlation IDs](#252-external-correlation-ids)
+      - [2.5.3 CUPTI Activity API](#253-cupti-activity-api)
+      - [2.5.4 Correlation ID Lifecycle](#254-correlation-id-lifecycle)
+  - [3. GPU Identification](#3-gpu-identification-1)
+  - [4. Communicator Information](#4-communicator-information-1)
+  - [5. Process and Thread Tracking](#5-process-and-thread-tracking-1)
+  - [6. Tracing](#6-tracing-1)
+    - [6.1 Directory Naming](#61-directory-naming)
+    - [6.2 Per-Process JSONL Trace Files](#62-per-process-jsonl-trace-files)
+  - [7. Thread Safety](#7-thread-safety-1)
+    - [7.1 NCCL's Threading Model](#71-nccls-threading-model)
+    - [7.2 Mutexes](#72-mutexes)
+    - [7.3 Lock Ordering](#73-lock-ordering)
+  - [8. Reference](#8-reference-1)
+    - [8.1 Data Structures](#81-data-structures)
+      - [BlacklistNode](#blacklistnode)
+      - [Blacklist](#blacklist)
+      - [MyEvent](#myevent)
+      - [EventPool](#eventpool)
+      - [MyContext](#mycontext)
+    - [8.2 API Functions](#82-api-functions)
+      - [myInit](#myinit)
+      - [myStartEvent](#mystartevent)
+      - [myStopEvent](#mystopevent)
+      - [myRecordEventState](#myrecordeventstate)
+      - [myFinalize](#myfinalize)
+    - [8.3 Event Types](#83-event-types)
+    - [8.4 Configuration](#84-configuration)
 
 ### 3. GPU Identification
+   - [3. GPU Identification](#3-gpu-identification)
 
 ### 4. Communicator Information
+   - [4. Communicator Information](#4-communicator-information)
 
 ### 5. Process and Thread Tracking
+   - [5. Process and Thread Tracking](#5-process-and-thread-tracking)
 
 ### 6. Tracing
-   - 6.1 Directory Naming
-   - 6.2 Per-Process JSONL Trace Files
+   - [6.1 Directory Naming](#61-directory-naming)
+   - [6.2 Per-Process JSONL Trace Files](#62-per-process-jsonl-trace-files)
 
 ### 7. Thread Safety
-   - 7.1 NCCL's Threading Model
-   - 7.2 Mutexes
-   - 7.3 Lock Ordering
+   - [7.1 NCCL's Threading Model](#71-nccls-threading-model)
+   - [7.2 Mutexes](#72-mutexes)
+   - [7.3 Lock Ordering](#73-lock-ordering)
 
 ### 8. Reference
-   - 8.1 Data Structures
-   - 8.2 API Functions
-   - 8.3 Event Types
-   - 8.4 Configuration
+   - [8.1 Data Structures](#81-data-structures)
+   - [8.2 API Functions](#82-api-functions)
+   - [8.3 Event Types](#83-event-types)
+   - [8.4 Configuration](#84-configuration)
 
 ---
 
@@ -524,6 +587,125 @@ For detached events, `parentObj` is an address in another process's memory. We c
 
 This allows post-processing tools to match events across processes by correlating `parentObj` values.
 
+#### 2.4.5 Parent-Child Reference Handling with PXN
+
+When handling parent-child relationships in the presence of PXN routing, there are four possible cases:
+
+1. **Normal child → Normal parent**: Both events are from the same process. The parent is tracked in the child's context blacklist (`ctx->blacklist`). ✅ **Currently handled**
+
+2. **PXN child → PXN parent**: Both events originate from different processes and are handled in the current process. As long as the parent PXN event and all it's child PXN events are handled in the same process, this will work (`pxnDetachBlacklist`). If not, it is impossible to protect the parent address with blacklisting. However coincidental address reuse across processes may be unlikely. ⚠️ **Suboptimally currently handled, impossible to solve completely**
+
+3. **Normal child → PXN parent**: The child event is from this process, but the parent originates from another process. The parent's address is in another process's address space. It is impossible to protect the parent address with blacklisting. However coincidental address reuse across processes may be unlikely. ⚠️ **Suboptimally currently handled, impossible to solve completely** - the parent is tracked in the child's context blacklist. As long as the parent PXN event and all it's child events are handled in this process, and all child events are from the same context, this will still work unintentionally correctly by using the childs' common blacklist for this context of this process.
+
+4. **PXN child → Normal parent**: The child event originates from another process, but the parent is from this process. The parent address should be protected in its owning context's blacklist (but we don't know which context owns it without expensive lookups). ❌ **Suboptimal currently handled** - the code tracks the parent in the PXN detach blacklist. As long as all PXN child event of this parent event are handled by the same process, and all of this parent event's childs are PXN events, this will still work unintentionally correctly by using the common PXN blacklist of this process.
+
+**Consequence:**
+
+If the blacklisting mechanism doesn't work correctly, parent addresses may be reused while still referenced by child events. This can lead to incorrect parent-child relationships when reconstructing the event hierarchy in post-processing. A child event might reference a parent address that has been reused for a different event, making it difficult or impossible to correctly identify the actual parent event in hindsight.
+
+**Potential Solution:**
+
+A solution for case 4. would be to use a single process-wide blacklist for all parents, regardless of whether they're normal or PXN. This would:
+- Eliminate the need to determine parent type
+- Handle all four cases uniformly
+- Simplify the code logic
+
+However, this approach has a trade-off: all parent tracking operations would require a process-wide mutex, which could create contention when multiple contexts/threads are tracking parents concurrently. The current per-context mutexes allow better parallelism.
+
+### 2.5 CUPTI Correlation Tracking
+
+#### 2.5.1 Why Correlate NCCL Events with CUDA Kernels
+
+Understanding which CUDA kernels trigger NCCL communication operations is crucial for performance analysis **because** it enables developers to identify the computational work that drives communication patterns. Without this correlation, it's difficult to answer questions like "Which kernel in my training loop is causing the AllReduce bottleneck?" or "What computation is happening during this P2P transfer?"
+
+The profiler uses CUPTI (CUDA Profiling Tools Interface) external correlation IDs **so that** NCCL events can be linked to CUDA kernel activities in post-processing tools. This correlation happens automatically when CUPTI is available, requiring no changes to application code.
+
+#### 2.5.2 External Correlation IDs
+
+CUPTI provides `cuptiPushExternalCorrelationId` and `cuptiPopExternalCorrelationId` functions that allow injecting custom correlation IDs into CUPTI's tracking system. **Because** these IDs are pushed onto a stack, any CUDA kernels launched while an ID is active will be tagged with that ID in CUPTI activity records.
+
+The profiler generates unique correlation IDs for `ncclProfileColl` and `ncclProfileP2p` events **since** these are the events that represent actual communication work (as opposed to API boundaries or internal operations). The correlation ID is:
+
+1. **Generated** when the event starts using an atomic counter (`nextCorrelationId`)
+2. **Pushed** to CUPTI's stack via `cuptiPushExternalCorrelationId(CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM0, id)`
+3. **Stored** in the `MyEvent` structure for logging
+4. **Popped** from CUPTI's stack when the event completes
+
+**Dynamic Loading**
+
+The profiler uses dynamic loading (`dlopen`/`dlsym`) to check for CUPTI availability **because** CUPTI may not be available on all systems (e.g., systems without CUDA development tools). If CUPTI is unavailable, correlation tracking is gracefully disabled without affecting NCCL profiling functionality.
+
+#### 2.5.3 CUPTI Activity API
+
+The profiler uses CUPTI's Activity API to capture kernel launches, memory copies, and other CUDA activities that occur during NCCL events. **Because** these activity records include the external correlation IDs we pushed, we can match them to NCCL events in post-processing.
+
+**Activity Record Processing**
+
+CUPTI provides activity records through a buffer callback mechanism:
+
+1. **Buffer Request**: CUPTI requests a buffer when it needs space for activity records
+2. **Buffer Completion**: CUPTI calls back when a buffer is full and ready to process
+3. **Record Processing**: The profiler iterates through records, extracts external correlation IDs, and writes matching records to JSONL
+
+**Filtering**
+
+Only activity records with external correlation IDs matching our NCCL events are written to JSONL **so that** the trace file doesn't become cluttered with unrelated CUDA activities. This filtering happens in `processCuptiActivityRecord()` by checking if `externalCorrelationId != 0`.
+
+**Activity Types Captured**
+
+The profiler enables and processes:
+- `CUPTI_ACTIVITY_KIND_KERNEL`: CUDA kernel launches (with grid/block dimensions, shared memory usage, etc.)
+- `CUPTI_ACTIVITY_KIND_MEMCPY`: Memory copy operations (HtoD, DtoH, etc.)
+- `CUPTI_ACTIVITY_KIND_MEMSET`: Memory set operations
+
+Each activity record includes timing information, device ID, stream ID, and kernel/operation names, enabling detailed analysis of what CUDA work occurred during each NCCL communication event.
+
+#### 2.5.4 Correlation ID Lifecycle
+
+**During Event Start (`myStartEvent`)**
+
+For `ncclProfileColl` and `ncclProfileP2p` events:
+
+```cpp
+if ((eDescr->type == ncclProfileColl || eDescr->type == ncclProfileP2p) && 
+    checkCuptiAvailable() && !event->fromDetachPool) {
+  event->externalCorrelationId = nextCorrelationId.fetch_add(1);
+  event->hasExternalCorrelationId = true;
+  cuptiPushExternalCorrelationId(CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM0, 
+                                  event->externalCorrelationId);
+}
+```
+
+**During Event Stop (`myStopEvent`)**
+
+The correlation ID is popped from CUPTI's stack:
+
+```cpp
+if (event->hasExternalCorrelationId && cuptiAvailable && !event->fromDetachPool) {
+  cuptiPopExternalCorrelationId(CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM0, nullptr);
+}
+```
+
+**In JSONL Output**
+
+NCCL events include the `extCorrId` field when present:
+
+```json
+{"recordType":"event","type":"ncclProfileColl","extCorrId":12345,...}
+```
+
+CUPTI activity records also include `extCorrId`:
+
+```json
+{"recordType":"cuptiActivity","type":"KERNEL","extCorrId":12345,"name":"myKernel",...}
+```
+
+Post-processing tools can match these by `extCorrId` to correlate NCCL events with CUDA kernels.
+
+**PXN Events**
+
+PXN (cross-process) events do not use correlation IDs **because** they execute in a different process than where they originated, and CUPTI correlation IDs are process-local. Only normal events (from the same process) can be correlated with CUDA activities.
+
 ---
 
 ## 3. GPU Identification
@@ -691,12 +873,13 @@ The solution is for each process to write to its own file, then merge the files 
 
 **Key Design: Separate Event and State Records**
 
-Each JSONL trace file contains two types of records:
+Each JSONL trace file contains three types of records:
 
 1. **Event records** (`recordType: "event"`): Written at STOP time with start/stop timestamps, duration, and type-specific details (but NOT embedded state transitions)
 2. **State records** (`recordType: "state"`): Written immediately when a state transition occurs, with a reference to the parent event via `eventAddr`
+3. **CUPTI Activity records** (`recordType: "cuptiActivity"`): Written when CUDA activities (kernels, memcpy, etc.) occur during NCCL events, with `extCorrId` matching the NCCL event
 
-The visualizer reconstructs complete events by matching state records to their parent events via the `eventAddr` field.
+The visualizer reconstructs complete events by matching state records to their parent events via the `eventAddr` field. CUPTI activity records can be correlated with NCCL events by matching `extCorrId` values.
 
 **File Name Format:**
 
@@ -733,6 +916,7 @@ The order of concatenation doesn't matter since each record is self-contained wi
 | `stop` | object | Stop info: `{ts, pid, tid}` |
 | `duration` | number | Duration in microseconds |
 | `myPid` | number | Process ID where event was recorded |
+| `extCorrId` | number | External correlation ID (present if CUPTI correlation enabled) |
 | `originPid` | number | For PXN events: originating process ID |
 | `parentObj` | string | Parent object pointer (hex) |
 | `eventAddr` | string | Event structure pointer (hex, used to link states) |
@@ -753,6 +937,24 @@ The order of concatenation doesn't matter since each record is self-contained wi
 | `tid` | number | Thread ID when state was recorded |
 | Additional fields | varies | State-specific details (e.g., `transSize`) |
 
+**CUPTI Activity Record Structure:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `recordType` | string | Always `"cuptiActivity"` |
+| `type` | string | Activity type: `"KERNEL"`, `"MEMCPY"`, or `"MEMSET"` |
+| `extCorrId` | number | External correlation ID (matches NCCL event's `extCorrId`) |
+| `corrId` | number | CUPTI's internal correlation ID |
+| `deviceId` | number | CUDA device ID |
+| `name` | string | Kernel name (for KERNEL activities) |
+| `stream` | string | CUDA stream pointer (hex) |
+| `size` | number | Bytes transferred (for MEMCPY/MEMSET) |
+| `start` | object | Start info: `{ts, pid, tid}` |
+| `stop` | object | Stop info: `{ts, pid, tid}` |
+| `duration` | number | Duration in microseconds |
+| `myPid` | number | Process ID where activity was recorded |
+| `details` | object | Type-specific activity details (grid/block dims, copy kind, etc.) |
+
 **Example Event Record:**
 
 ```json
@@ -769,6 +971,18 @@ The order of concatenation doesn't matter since each record is self-contained wi
 
 ```json
 {"recordType":"state","eventAddr":"0x7f9876543210","ts":1350.000,"name":"ProxyStepSendWait","id":7,"pid":12345,"tid":12348,"transSize":524288}
+```
+
+**Example CUPTI Activity Record (Kernel):**
+
+```json
+{"recordType":"cuptiActivity","type":"KERNEL","extCorrId":12345,"corrId":67890,"deviceId":0,"name":"myTrainingKernel","stream":"0x7f1234567890","start":{"ts":1235.000,"pid":12345,"tid":12346},"stop":{"ts":1240.000,"pid":12345,"tid":12346},"duration":5.000,"myPid":12345,"details":{"gridX":256,"gridY":1,"gridZ":1,"blockX":256,"blockY":1,"blockZ":1,"registersPerThread":32,"staticSharedMemory":8192,"dynamicSharedMemory":0,"localMemoryPerThread":0,"localMemoryTotal":0,"sharedMemoryExecuted":8192}}
+```
+
+**Example CUPTI Activity Record (Memcpy):**
+
+```json
+{"recordType":"cuptiActivity","type":"MEMCPY","extCorrId":12345,"corrId":67891,"deviceId":0,"stream":"0x7f1234567890","size":1048576,"start":{"ts":1240.000,"pid":12345,"tid":12346},"stop":{"ts":1241.000,"pid":12345,"tid":12346},"duration":1.000,"myPid":12345,"details":{"copyKind":"HtoD","bytes":1048576}}
 ```
 
 **ProfilerLifecycle Pseudo-Events:**
@@ -942,6 +1156,10 @@ struct MyEvent {
   char gpuUuid[64];       // GPU UUID (empty for PXN events)
   uint64_t commId;        // Communicator ID (0 for PXN events)
   int rank;               // Rank (-1 for PXN events)
+  
+  // CUPTI external correlation ID tracking
+  uint64_t externalCorrelationId;  // Custom correlation ID for linking to CUDA activities
+  bool hasExternalCorrelationId;    // Whether correlation ID was successfully pushed
 };
 ```
 
@@ -953,6 +1171,8 @@ struct MyEvent {
 5. Freed by `EventPool::free()` or `freeToPxnPool()`
 
 **Note on PXN Safety:** The `gpuUuid`, `commId`, and `rank` fields are copied from the context at START time (for normal events) or set to empty/default values (for PXN events). This ensures these values are safe to access at STOP time even for PXN events where the original context pointer is invalid.
+
+**Note on CUPTI Correlation:** The `externalCorrelationId` and `hasExternalCorrelationId` fields are only set for `ncclProfileColl` and `ncclProfileP2p` events when CUPTI is available. PXN events do not use correlation IDs **because** they execute in a different process than where they originated, and CUPTI correlation IDs are process-local.
 
 **Note on Dynamic Allocation:** The use of `std::vector` and `std::string` means there are no arbitrary limits on the number of state transitions or size of details. Memory is allocated as needed and freed when the event is deallocated.
 
@@ -1020,7 +1240,7 @@ ncclResult_t myInit(void** context, uint64_t commId, int* eActivationMask,
 **Actions:**
 1. Parse `NCCL_PROFILE_EVENT_MASK` environment variable
 2. Create dump directory
-3. Initialize process-wide state (first rank only): PID, detach pool
+3. Initialize process-wide state (first rank only): PID, detach pool, CUPTI Activity API
 4. Allocate and initialize `MyContext`
 5. Query GPU UUID from current CUDA device
 6. Initialize mutex, pool, and blacklist
@@ -1050,7 +1270,8 @@ ncclResult_t myStartEvent(void* context, void** eHandle,
 2. Allocate `MyEvent` from appropriate pool (per-context or detach)
 3. Populate event fields (type, timestamp, function name, parent pointer)
 4. Add parent address to blacklist (if parentObj is set)
-5. Extract type-specific information and log START entry
+5. Push external correlation ID to CUPTI (for coll/p2p events, if CUPTI available)
+6. Extract type-specific information and log START entry
 
 **Return Values:**
 - `ncclSuccess`: Always (allocation failures set `eHandle` to nullptr)
@@ -1069,8 +1290,9 @@ ncclResult_t myStopEvent(void* eHandle)
 **Actions:**
 1. Calculate duration (current time - start time)
 2. Write JSONL event record
-3. Decrement parent's blacklist reference count
-4. Free event back to pool (or delete if dynamically allocated)
+3. Pop external correlation ID from CUPTI (if one was pushed)
+4. Decrement parent's blacklist reference count
+5. Free event back to pool (or delete if dynamically allocated)
 
 **Return Values:**
 - `ncclSuccess`: Always
@@ -1113,8 +1335,8 @@ ncclResult_t myFinalize(void* context)
 1. Unregister context from process-wide registry
 2. Write ProfilerFinalize lifecycle event to JSONL
 3. Destroy mutex
-5. Delete `MyContext` (destructor cleans up pool and blacklist)
-6. Decrement process init count; clean up detach pool if last rank
+4. Delete `MyContext` (destructor cleans up pool and blacklist)
+5. Decrement process init count; clean up detach pool and CUPTI Activity API if last rank
 
 **Return Values:**
 - `ncclSuccess`: Always
