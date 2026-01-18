@@ -30,7 +30,7 @@ def find_trace_files(search_dir: Path) -> list:
     if not search_dir.exists() or not search_dir.is_dir():
         return []
     
-    pid_pattern = str(search_dir / 'trace_*_pid*.jsonl')
+    pid_pattern = str(search_dir / 'trace_pid*.jsonl')
     pid_matches = glob.glob(pid_pattern)
     
     if pid_matches:

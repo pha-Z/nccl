@@ -9,14 +9,18 @@
  * - Blacklist with LRU eviction to prevent reuse of addresses still referenced as parents
  * - O(1) operations for all blacklist operations via hash map + doubly linked list
  * - PXN (PCI x NVLink) support for cross-process ProxyOp events
- * 
+ * - Kernel record correlation with nccl events via CUPTI API 
+ *
  * Code Organization:
  * 1. Configuration constants
- * 2. Data structures
- * 3. PXN Detach Pool module
- * 4. Utility functions
- * 5. Profiler API implementation
- * 6. Export struct
+ * 2. Util functions
+ * 3. Data structures
+ * 4. Process resources requiring thread safety
+ * 5. PXN Pool module
+ * 6. CUPTI activity record tracking
+ * 7. Logging
+ * 8. Profiler API implementation
+ * 9. Export struct
  ************************************************************************/
 
 #include <cstdio>
@@ -42,7 +46,6 @@
 
 // Include CUPTI for correlation ID tracking
 #include <cupti.h>
-#include <dlfcn.h>
 #include <atomic>
 
 // Include the profiler API headers (C headers)
@@ -54,36 +57,183 @@ extern "C" {
 }
 
 // ============================================================================
+// CUPTI Error Checking Macro
+// ============================================================================
+#ifndef CUPTI_API_CALL
+#define CUPTI_API_CALL(apiFunctionCall)                                             \
+do {                                                                                \
+    CUptiResult _status = apiFunctionCall;                                          \
+    if (_status != CUPTI_SUCCESS) {                                                 \
+        const char *pErrorString;                                                   \
+        cuptiGetResultString(_status, &pErrorString);                               \
+        fprintf(stderr, "[MinimalProfiler] WARNING: %s:%d: Function %s failed with error(%d): %s\n", \
+                __FILE__, __LINE__, #apiFunctionCall, _status,                      \
+                pErrorString ? pErrorString : "Unknown error");                     \
+    }                                                                               \
+} while (0)
+#endif
+
+// ============================================================================
 // SECTION 1: Configuration Constants
 // ============================================================================
-
-// Pool sizing
-static const size_t INITIAL_POOL_SIZE = 1024;           // Initial event pool size per context
-static const size_t INITIAL_DETACH_POOL_SIZE = 256;     // Initial size for PXN detach pool
-
-// Blacklist sizing
-static const size_t BLACKLIST_CAP = 10000000;           // 10 million entries max
 
 // Environment variable names
 static const char* ENV_EVENT_MASK = "NCCL_PROFILE_EVENT_MASK";
 
-// JSONL tracing configuration
-// Note: Each process writes to its own trace file (trace_<jobid>_proc<procid>.jsonl).
-// This avoids write interleaving issues on network filesystems (NFS, Lustre, GPFS)
-// where O_APPEND atomicity guarantees do not apply across different clients/nodes.
+// Pool sizing
+static const size_t INITIAL_POOL_SIZE = 256;             // Initial event pool size per context
+static const size_t INITIAL_PXN_POOL_SIZE = 256;         // Initial size for PXN pool
 
-// ============================================================================
-// SECTION 2: Data Structures
-// ============================================================================
+// Blacklist sizing
+static const size_t BLACKLIST_CAP = 10000000;            // 10 million entries max
+
+// CUPTI activity record requested buffer sizing
+static const size_t CUPTI_BUFFER_SIZE = 1024 * 1024 * 8; // 8MB buffers
 
 // Forward declarations
-struct MyEvent;
-struct MyContext;
-struct EventPool;
-struct Blacklist;
-
-// Forward declare functions used before definition
+static bool initPxnPool();
+static bool initJsonlTraceFile(const char* dirname);
+static bool initCuptiActivity();
+static void writeJsonlCuptiActivityRecord(uint32_t kind, uint64_t startTime, uint64_t endTime,
+                                          uint32_t correlationId, uint64_t externalCorrelationId,
+                                          uint32_t deviceId, const char* name, void* stream,
+                                          size_t size, const std::string& detailsJson);
+static void cleanupCuptiActivity();
 static void closeSharedJsonlFile();
+static std::string escapeJsonStringStd(const char* input);
+
+
+// ============================================================================
+// SECTION 2: Utility Functions
+// ============================================================================
+
+// Get current cpu timestamp in microseconds
+static double getTime() {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return ts.tv_sec * 1e6 + ts.tv_nsec * 1e-3;
+}
+
+// Get thread ID
+static inline pid_t getTid() {
+  return static_cast<pid_t>(syscall(SYS_gettid));
+}
+
+// Get GPU UUID from current CUDA device
+static std::string getGpuUuid() {
+  int dev;
+  if (cudaGetDevice(&dev) != cudaSuccess) {
+    return "";
+  }
+  
+  cudaDeviceProp deviceProp;
+  if (cudaGetDeviceProperties(&deviceProp, dev) != cudaSuccess) {
+    return "";
+  }
+  
+  // Format UUID as standard string: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+  char uuidStr[37];
+  snprintf(uuidStr, sizeof(uuidStr),
+           "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+           deviceProp.uuid.bytes[0], deviceProp.uuid.bytes[1],
+           deviceProp.uuid.bytes[2], deviceProp.uuid.bytes[3],
+           deviceProp.uuid.bytes[4], deviceProp.uuid.bytes[5],
+           deviceProp.uuid.bytes[6], deviceProp.uuid.bytes[7],
+           deviceProp.uuid.bytes[8], deviceProp.uuid.bytes[9],
+           deviceProp.uuid.bytes[10], deviceProp.uuid.bytes[11],
+           deviceProp.uuid.bytes[12], deviceProp.uuid.bytes[13],
+           deviceProp.uuid.bytes[14], deviceProp.uuid.bytes[15]);
+  
+  return std::string(uuidStr);
+}
+
+// Get human-readable event type name
+static const char* getEventTypeName(uint64_t type) {
+  switch (type) {
+    case ncclProfileGroupApi:     return "ncclProfileGroupApi";
+    case ncclProfileCollApi:      return "ncclProfileCollApi";
+    case ncclProfileP2pApi:       return "ncclProfileP2pApi";
+    case ncclProfileKernelLaunch: return "ncclProfileKernelLaunch";
+    case ncclProfileColl:         return "ncclProfileColl";
+    case ncclProfileP2p:          return "ncclProfileP2p";
+    case ncclProfileProxyOp:      return "ncclProfileProxyOp";
+    case ncclProfileProxyStep:    return "ncclProfileProxyStep";
+    case ncclProfileProxyCtrl:    return "ncclProfileProxyCtrl";
+    case ncclProfileKernelCh:     return "ncclProfileKernelCh";
+    case ncclProfileNetPlugin:    return "ncclProfileNetPlugin";
+    case ncclProfileGroup:        return "ncclProfileGroup";
+    default:                      return "ncclProfileUnknown";
+  }
+}
+
+// Get human-readable state name
+static const char* getStateName(ncclProfilerEventState_v5_t eState) {
+  switch (eState) {
+    case ncclProfilerProxyOpSendPosted:        return "ProxyOpSendPosted (deprecated)";
+    case ncclProfilerProxyOpSendRemFifoWait:   return "ProxyOpSendRemFifoWait (deprecated)";
+    case ncclProfilerProxyOpSendTransmitted:   return "ProxyOpSendTransmitted (deprecated)";
+    case ncclProfilerProxyOpSendDone:          return "ProxyOpSendDone (deprecated)";
+    case ncclProfilerProxyOpRecvPosted:        return "ProxyOpRecvPosted (deprecated)";
+    case ncclProfilerProxyOpRecvReceived:      return "ProxyOpRecvReceived (deprecated)";
+    case ncclProfilerProxyOpRecvTransmitted:   return "ProxyOpRecvTransmitted (deprecated)";
+    case ncclProfilerProxyOpRecvDone:          return "ProxyOpRecvDone (deprecated)";
+    case ncclProfilerProxyStepSendGPUWait:     return "ProxyStepSendGPUWait";
+    case ncclProfilerProxyStepSendWait:        return "ProxyStepSendWait";
+    case ncclProfilerProxyStepRecvWait:        return "ProxyStepRecvWait";
+    case ncclProfilerProxyStepRecvFlushWait:   return "ProxyStepRecvFlushWait";
+    case ncclProfilerProxyStepRecvGPUWait:     return "ProxyStepRecvGPUWait";
+    case ncclProfilerProxyCtrlIdle:            return "ProxyCtrlIdle";
+    case ncclProfilerProxyCtrlActive:          return "ProxyCtrlActive";
+    case ncclProfilerProxyCtrlSleep:           return "ProxyCtrlSleep";
+    case ncclProfilerProxyCtrlWakeup:          return "ProxyCtrlWakeup";
+    case ncclProfilerProxyCtrlAppend:          return "ProxyCtrlAppend";
+    case ncclProfilerProxyCtrlAppendEnd:       return "ProxyCtrlAppendEnd";
+    case ncclProfilerProxyOpInProgress_v4:     return "ProxyOpInProgress";
+    case ncclProfilerProxyStepSendPeerWait_v4: return "ProxyStepSendPeerWait";
+    case ncclProfilerNetPluginUpdate:          return "NetPluginUpdate";
+    case ncclProfilerKernelChStop:             return "KernelChStop";
+    case ncclProfilerEndGroupApiStart:         return "EndGroupApiStart";
+    case ncclProfilerBeginGroupApiEnd:         return "BeginGroupApiEnd";
+    default:                                   return "Unknown";
+  }
+}
+
+// ============================================================================
+// SECTION 3: Data Structures
+// ============================================================================
+
+// ----------------------------------------------------------------------------
+// Forward declarations for data structures
+// ----------------------------------------------------------------------------
+struct MyContext;
+
+// ----------------------------------------------------------------------------
+// MyEvent: Stores event data + parent reference
+// ----------------------------------------------------------------------------
+struct MyEvent {
+  // Basic event info (set at START)
+  uint64_t type;
+  const char* typeName;
+  MyContext* ctx;
+  void* parentObj;          // Store parentObj to decrement blacklist ref on stop
+  bool fromPool;            // Indicates whether this event was allocated from pool or dynamically
+  bool isPxn;               // Indicates whether this event is from pxn pool
+  double startTime;
+  pid_t startTid;
+  pid_t startPid;
+  std::string typeDetails;  // Type-specific details JSON
+  
+  // Context-dependent fields captured at START (safe for PXN - copied, not pointer)
+  char gpuUuid[37];       // GPU UUID (empty for PXN events)
+  uint64_t commId;        // Communicator ID (0 for PXN events)
+  int rank;               // Rank (-1 for PXN events)
+  
+  // CUPTI external correlation ID tracking
+  // This ID links NCCL events to CUDA kernel activities, enabling correlation
+  // between communication operations and the kernels that triggered them.
+  uint64_t externalCorrelationId;  // Our custom correlation ID for this event
+  bool hasExternalCorrelationId;    // Whether we successfully pushed an ID
+};
 
 // ----------------------------------------------------------------------------
 // BlacklistNode: Node for LRU linked list in Blacklist
@@ -155,8 +305,8 @@ struct Blacklist {
     
     // Log warning about forced eviction to stderr
     fprintf(stderr, "[MinimalProfiler] WARNING: Blacklist cap reached (%zu), evicting address %p with refCount=%d. "
-            "Potential false parent-child match may occur.\n",
-            cap, node->address, node->refCount);
+              "Potential false parent-child match may occur.\n",
+              cap, node->address, node->refCount);
     
     // Unlink head
     head = node->next;
@@ -232,37 +382,6 @@ struct Blacklist {
 };
 
 // ----------------------------------------------------------------------------
-// MyEvent: Stores event data + parent reference for cleanup
-// ----------------------------------------------------------------------------
-struct MyEvent {
-  // Basic event info (set at START)
-  uint64_t type;
-  double startTime;
-  const char* typeName;
-  MyContext* ctx;
-  void* parentObj;        // Store parentObj to decrement blacklist ref on stop
-  bool fromPool;          // Indicates whether this event was allocated from pool or dynamically
-  bool fromDetachPool;    // Indicates whether this event is from detach pool (PXN event)
-  pid_t originPid;        // PID of the process that originated this event (for PXN tracking)
-  
-  // Start event details (captured at START for JSONL output)
-  pid_t startTid;
-  pid_t startPid;
-  std::string startDetails;  // Type-specific details JSON from START (dynamic)
-  
-  // Context-dependent fields captured at START (safe for PXN - copied, not pointer)
-  char gpuUuid[64];       // GPU UUID (empty for PXN events)
-  uint64_t commId;        // Communicator ID (0 for PXN events)
-  int rank;               // Rank (-1 for PXN events)
-  
-  // CUPTI external correlation ID tracking
-  // This ID links NCCL events to CUDA kernel activities, enabling correlation
-  // between communication operations and the kernels that triggered them.
-  uint64_t externalCorrelationId;  // Our custom correlation ID for this event
-  bool hasExternalCorrelationId;    // Whether we successfully pushed an ID
-};
-
-// ----------------------------------------------------------------------------
 // EventPool: Round-robin allocation pool for events
 // Uses chunked allocation to avoid address reuse while maintaining cache locality
 // ----------------------------------------------------------------------------
@@ -335,7 +454,7 @@ struct EventPool {
     inUseChunks.push_back(newInUse);
     
     fprintf(stdout, "[MinimalProfiler] INFO: Event pool grown: added chunk %zu (total chunks: %zu, total slots: %zu)\n",
-            chunks.size() - 1, chunks.size(), chunks.size() * chunkSize);
+              chunks.size() - 1, chunks.size(), chunks.size() * chunkSize);
     
     return true;
   }
@@ -473,91 +592,114 @@ struct EventPool {
 // MyContext: Per-communicator plugin state
 // ----------------------------------------------------------------------------
 struct MyContext {
-  pthread_mutex_t allocMutex;   // Protects pool and blacklist
   uint64_t commId;
   int rank;
   int nranks;
   double startTime;
   char gpuUuid[37];             // Physical GPU UUID string (36 chars + null terminator)
   
+  pthread_mutex_t poolBlacklistMutex;   // Protects pool and blacklist
   EventPool pool;
   Blacklist blacklist;
 };
 
 // ============================================================================
-// SECTION 3: Process-Wide Global State
+// SECTION 4: Process resources
 // ============================================================================
 // These resources are shared across all communicators (contexts) within a single
 // process. They are initialized when the first communicator is created and
 // cleaned up when the last communicator is finalized.
-//
-// PXN (PCI x NVLink) Support:
-// When PXN routing is enabled, some ProxyOp events may be executed by a different
-// process than the one that originated them. The parentObj pointer in such events
-// points to the originator's address space, which is invalid in the executing process.
-// These "detached" events are stored in a separate pool (pxnDetachPool) and we store
-// parentObj as metadata (pointer value) for tracking but never dereference it.
-// We detect PXN events by checking eDescr->proxyOp.pid against profilerPid.
-// ============================================================================
 
-// Forward declaration for utility function used in this section
-static double getTime();
-
-// Lifecycle tracking for process-wide resources
 static pthread_mutex_t processStateMutex = PTHREAD_MUTEX_INITIALIZER;
-static int activeContextCount = 0;           // Number of active communicators in this process
-static pid_t profilerPid = 0;                // This process's PID (set once at first init)
-static uint64_t firstCommId = 0;             // First commId seen (used for file naming)
 
-// PXN Detach Pool: handles cross-process ProxyOp events
-static EventPool* pxnDetachPool = nullptr;
-static Blacklist* pxnDetachBlacklist = nullptr;
-static pthread_mutex_t pxnDetachMutex = PTHREAD_MUTEX_INITIALIZER;
-
-// Per-process JSONL trace file (each process writes to its own file)
-static FILE* sharedJsonlFile = nullptr;      // Per-process trace file (write mode, exclusive access)
-static pthread_mutex_t jsonlFileMutex = PTHREAD_MUTEX_INITIALIZER;  // Protects writes within this process
+// JSONL trace file (each process writes to its own file)
+static FILE* sharedJsonlFile = nullptr;      // Per-process trace file
 static char sharedJsonlPath[512] = {0};      // Path to this process's JSONL file
+static pthread_mutex_t jsonlFileMutex = PTHREAD_MUTEX_INITIALIZER;  // Protects writes within this process
+
+// CUPTI Subscriber for Callback API
+static CUpti_SubscriberHandle cuptiSubscriber = nullptr;
+// track if CUPTI is initialized or cleaned up
+static bool cuptiActivityEnabled = false;
 
 // CUPTI external correlation ID tracking
 // These correlation IDs link NCCL events to CUDA kernel activities, enabling post-processing
 // tools to identify which kernels were launched during specific communication operations.
 static std::atomic<uint64_t> nextCorrelationId(1);  // Global correlation ID counter (thread-safe)
-static bool cuptiAvailable = false;                 // Whether CUPTI functions are available
 
-// Check if CUPTI is available and can be used for correlation tracking
-// This uses dynamic loading because CUPTI may not be available on all systems
-static bool checkCuptiAvailable() {
-  static bool checked = false;
-  static bool available = false;
-  
-  if (checked) return available;
-  
-  // Try to load CUPTI library dynamically
-  void* cuptiHandle = dlopen("libcupti.so", RTLD_LAZY);
-  if (cuptiHandle) {
-    // Check if required functions are available
-    void* pushFunc = dlsym(cuptiHandle, "cuptiPushExternalCorrelationId");
-    void* popFunc = dlsym(cuptiHandle, "cuptiPopExternalCorrelationId");
-    
-    if (pushFunc && popFunc) {
-      available = true;
-      fprintf(stdout, "[MinimalProfiler] CUPTI external correlation ID support available\n");
-    } else {
-      dlclose(cuptiHandle);
-    }
-  }
-  
-  checked = true;
-  cuptiAvailable = available;
-  return available;
-}
+// Timestamp synchronization: Map CUPTI timestamps to CPU time domain
+// CUPTI activity records use GPU-synchronized timestamps (nanoseconds) that are in a different
+// time domain than CPU timestamps from getTime() (microseconds, CLOCK_MONOTONIC).
+// We capture one reference pair to caculate the offset once during CUPTI
+// initialization as follows: offset = cpuTime - cuptiTime/1000.0
+// when outputting CUPTI records, convert timestamp: cpuTime = cuptiTime/1000.0 + offset
+static double cuptiTimestampOffsetUs = 0.0;
+
+// PXN Pool: handles cross-process Proxy events
+static EventPool* pxnPool = nullptr;
+static Blacklist* pxnBlacklist = nullptr;
+static pthread_mutex_t pxnPoolBlacklistMutex = PTHREAD_MUTEX_INITIALIZER;
 
 // Context registry: tracks all valid context pointers created by this process
 // When PXN routing is enabled, NCCL may pass context pointers from other processes
 // which are invalid in our address space. We use this registry to validate contexts.
 static std::unordered_map<void*, MyContext*> contextRegistry;
 static pthread_mutex_t contextRegistryMutex = PTHREAD_MUTEX_INITIALIZER;
+
+static int activeContextCount = 0;           // Number of active communicators in this process
+
+static void initProcessResources(const char* dirname) {
+  if (initPxnPool()) {
+    fprintf(stdout, "[MinimalProfiler] PXN Pool initialized\n");
+  } else {
+    fprintf(stderr, "[MinimalProfiler] WARNING: Failed to initialize PXN pool\n");
+  }
+
+  if (initJsonlTraceFile(dirname)) {
+    fprintf(stdout, "[MinimalProfiler] JSONL trace file initialized\n");
+  } else {
+    fprintf(stderr, "[MinimalProfiler] WARNING: Failed to initialize JSONL file\n");
+  }
+  
+  if (initCuptiActivity()) {
+    fprintf(stdout, "[MinimalProfiler] CUPTI Activity API initialized\n");
+  } else {
+    fprintf(stderr, "[MinimalProfiler] WARNING: CUPTI Activity API failed\n");
+  }
+}
+
+// Clean up process-wide resources (called when last communicator is finalized)
+static void cleanupProcessResources() {
+  // Cleanup CUPTI Activity API (flushes activities to JSONL)
+  // Must happen before closing the JSONL file
+  cleanupCuptiActivity();
+  
+  // Close the shared JSONL file (after CUPTI activities are written)
+  closeSharedJsonlFile();
+  pthread_mutex_destroy(&jsonlFileMutex);
+  
+  // clean up PXN related resources
+  delete pxnPool;
+  delete pxnBlacklist;
+  pxnPool = nullptr;
+  pxnBlacklist = nullptr;
+  pthread_mutex_destroy(&pxnPoolBlacklistMutex);
+  
+  pthread_mutex_lock(&contextRegistryMutex);
+  contextRegistry.clear();
+  pthread_mutex_unlock(&contextRegistryMutex);
+  pthread_mutex_destroy(&contextRegistryMutex);
+}
+
+// ============================================================================
+// Section 5: PXN (PCI x NVLink)
+// ============================================================================
+// When PXN routing is enabled, some ProxyOp events may be executed by a different
+// process than the one that originated them. The parentObj pointer in such events
+// points to the originator's address space, which is invalid in the executing process.
+// These events are stored in a separate pool (pxnPool) and we store
+// parentObj as metadata (pointer value) for tracking but never dereference it.
+// We detect PXN events by checking eDescr->proxyOp.pid against getpid().
 
 // Check if a context pointer is valid (belongs to this process)
 static bool isValidContext(void* ctx) {
@@ -584,201 +726,399 @@ static void unregisterContext(MyContext* ctx) {
   pthread_mutex_unlock(&contextRegistryMutex);
 }
 
-// Initialize the PXN detach pool (called on first communicator init)
-static bool initPxnDetachPool() {
-  pxnDetachPool = new (std::nothrow) EventPool();
-  pxnDetachBlacklist = new (std::nothrow) Blacklist();
+// Initialize the PXN pool (called on first communicator init)
+static bool initPxnPool() {
+  pxnPool = new (std::nothrow) EventPool();
+  pxnBlacklist = new (std::nothrow) Blacklist();
   
-  if (!pxnDetachPool || !pxnDetachBlacklist) {
-    delete pxnDetachPool;
-    delete pxnDetachBlacklist;
-    pxnDetachPool = nullptr;
-    pxnDetachBlacklist = nullptr;
+  if (!pxnPool || !pxnBlacklist) {
+    delete pxnPool;
+    delete pxnBlacklist;
+    pxnPool = nullptr;
+    pxnBlacklist = nullptr;
     return false;
   }
   
-  if (!pxnDetachPool->init(INITIAL_DETACH_POOL_SIZE)) {
-    delete pxnDetachPool;
-    delete pxnDetachBlacklist;
-    pxnDetachPool = nullptr;
-    pxnDetachBlacklist = nullptr;
+  if (!pxnPool->init(INITIAL_PXN_POOL_SIZE)) {
+    delete pxnPool;
+    delete pxnBlacklist;
+    pxnPool = nullptr;
+    pxnBlacklist = nullptr;
     return false;
   }
   
   return true;
 }
 
-// Allocate an event from the PXN detach pool
+// Allocate an event from the PXN pool
 static MyEvent* allocateFromPxnPool() {
-  if (!pxnDetachPool || !pxnDetachBlacklist) {
+  if (!pxnPool || !pxnBlacklist) {
     return nullptr;
   }
   
-  pthread_mutex_lock(&pxnDetachMutex);
-  MyEvent* event = pxnDetachPool->allocate(*pxnDetachBlacklist);
-  pthread_mutex_unlock(&pxnDetachMutex);
+  pthread_mutex_lock(&pxnPoolBlacklistMutex);
+  MyEvent* event = pxnPool->allocate(*pxnBlacklist);
+  pthread_mutex_unlock(&pxnPoolBlacklistMutex);
   
   if (event) {
-    event->fromDetachPool = true;
+    event->isPxn = true;
     event->fromPool = true;
   }
   
   return event;
 }
 
-// Free an event back to the PXN detach pool
+// Free an event back to the PXN pool
 static void freeToPxnPool(MyEvent* event) {
-  if (!pxnDetachPool) return;
+  if (!pxnPool) return;
   
-  pthread_mutex_lock(&pxnDetachMutex);
-  pxnDetachPool->free(event);
-  pthread_mutex_unlock(&pxnDetachMutex);
+  pthread_mutex_lock(&pxnPoolBlacklistMutex);
+  pxnPool->free(event);
+  pthread_mutex_unlock(&pxnPoolBlacklistMutex);
 }
 
 // Track a parent address in the PXN blacklist
 static void trackPxnParent(void* parentObj) {
-  if (!parentObj || !pxnDetachBlacklist) return;
+  if (!parentObj || !pxnBlacklist) return;
   
-  pthread_mutex_lock(&pxnDetachMutex);
-  if (pxnDetachBlacklist->contains(parentObj)) {
-    pxnDetachBlacklist->incrementRef(parentObj);
+  pthread_mutex_lock(&pxnPoolBlacklistMutex);
+  if (pxnBlacklist->contains(parentObj)) {
+    pxnBlacklist->incrementRef(parentObj);
   } else {
-    pxnDetachBlacklist->add(parentObj);
+    pxnBlacklist->add(parentObj);
   }
-  pthread_mutex_unlock(&pxnDetachMutex);
+  pthread_mutex_unlock(&pxnPoolBlacklistMutex);
 }
 
 // Release a parent address from the PXN blacklist
 static void releasePxnParent(void* parentObj) {
-  if (!parentObj || !pxnDetachBlacklist) return;
+  if (!parentObj || !pxnBlacklist) return;
   
-  pthread_mutex_lock(&pxnDetachMutex);
-  pxnDetachBlacklist->decrementRef(parentObj);
-  pthread_mutex_unlock(&pxnDetachMutex);
-}
-
-// Clean up process-wide resources (called when last communicator is finalized)
-static void cleanupProcessResources() {
-  // Close the shared JSONL file
-  closeSharedJsonlFile();
-  pthread_mutex_destroy(&jsonlFileMutex);
-  
-  // Cleanup CUPTI Activity API
-  cleanupCuptiActivity();
-  
-  delete pxnDetachPool;
-  delete pxnDetachBlacklist;
-  pxnDetachPool = nullptr;
-  pxnDetachBlacklist = nullptr;
-  profilerPid = 0;
-  pthread_mutex_destroy(&pxnDetachMutex);
-  
-  // Clean up the context registry
-  pthread_mutex_lock(&contextRegistryMutex);
-  contextRegistry.clear();
-  pthread_mutex_unlock(&contextRegistryMutex);
-  pthread_mutex_destroy(&contextRegistryMutex);
+  pthread_mutex_lock(&pxnPoolBlacklistMutex);
+  pxnBlacklist->decrementRef(parentObj);
+  pthread_mutex_unlock(&pxnPoolBlacklistMutex);
 }
 
 // ============================================================================
-// SECTION 4: Utility Functions
+// SECTION 6: CUPTI Activity API Module for JSONL Activity Record Dumping
+// ============================================================================
+// This module captures CUDA activity records (kernels, memcpy, etc.) that have
+// external correlation IDs matching our NCCL events. By writing these to the
+// same JSONL file, post-processing tools can correlate NCCL communication events
+// with the CUDA kernels that triggered them.
 // ============================================================================
 
-// ----------------------------------------------------------------------------
-// Time and Thread Helpers
-// ----------------------------------------------------------------------------
+// CUPTI callback functions (modified from code sample `helper_cupti_activity.h`)
+// Copyright 2022-2025 NVIDIA Corporation. refer to NVIDIA EULA associated with this code
+static void handleDomainStateCallback(CUpti_CallbackId callbackId, const CUpti_StateData *pStateData) {
+  switch (callbackId) {
+    case CUPTI_CBID_STATE_FATAL_ERROR: {
+      // If there is a CUPTI fatal error, it means CUPTI has stopped profiling the application.
+      const char *errorString = NULL;
+      cuptiGetResultString(pStateData->notification.result, &errorString);
 
-// Get current timestamp in microseconds
-static double getTime() {
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  return ts.tv_sec * 1e6 + ts.tv_nsec * 1e-3;
-}
-
-// Get thread ID (Linux-specific)
-static inline pid_t getTid() {
-  return static_cast<pid_t>(syscall(SYS_gettid));
-}
-
-// ----------------------------------------------------------------------------
-// JSON/JSONL Utility Functions
-// ----------------------------------------------------------------------------
-
-// Escape a JSON string and return as std::string (dynamic, no size limit)
-static std::string escapeJsonStringStd(const char* input) {
-  if (!input) return "";
-  
-  std::string result;
-  result.reserve(strlen(input) * 2);  // Reserve space for worst case
-  
-  for (size_t i = 0; input[i] != '\0'; i++) {
-    char c = input[i];
-    switch (c) {
-      case '"':  result += "\\\""; break;
-      case '\\': result += "\\\\"; break;
-      case '\n': result += "\\n"; break;
-      case '\r': result += "\\r"; break;
-      case '\t': result += "\\t"; break;
-      default:
-        if (c >= 32 && c < 127) {  // Printable ASCII
-          result += c;
-        }
-        // Skip non-printable characters
-        break;
+      fprintf(stderr, "\nCUPTI encountered fatal error: %s\n", errorString);
+      fprintf(stderr, "Error message: %s\n", pStateData->notification.message);
     }
+    default:
+      break;
   }
-  return result;
 }
 
-// Format a pointer as std::string
-static std::string formatPointerStd(const void* ptr) {
-  char buf[32];
-  if (ptr) {
-    snprintf(buf, sizeof(buf), "0x%lx", reinterpret_cast<unsigned long>(ptr));
-  } else {
-    snprintf(buf, sizeof(buf), "null");
+static void handleSyncronizationCallbacks(CUpti_CallbackId callbackId, 
+                                          const CUpti_SynchronizeData *pSynchronizeData) {
+  // Flush the CUPTI activity records buffer on context synchronization
+  if (callbackId == CUPTI_CBID_SYNCHRONIZE_CONTEXT_SYNCHRONIZED) {
+    CUPTI_API_CALL(cuptiActivityFlushAll(0));
   }
-  return std::string(buf);
+  // Flush the CUPTI activity records buffer on stream synchronization
+  else if (callbackId == CUPTI_CBID_SYNCHRONIZE_STREAM_SYNCHRONIZED) {
+    uint32_t streamId = 0;
+    CUPTI_API_CALL(cuptiGetStreamId(pSynchronizeData->context, pSynchronizeData->stream, &streamId));
+    CUPTI_API_CALL(cuptiActivityFlushAll(0));
+  }
 }
 
-// Initialize the per-process JSONL trace file (called on first communicator init)
-// Each process writes to its own file to avoid interleaving issues on network filesystems
-// (NFS, Lustre, GPFS do not honor O_APPEND atomicity guarantees)
-static bool initSharedJsonlFile(const char* dirname) {
-  const char* slurm_job_id = getenv("SLURM_JOB_ID");
-  pid_t pid = getpid();
+// subscribe this function in profiler/cupti initialization
+static void CUPTIAPI cuptiCallbackHandler(void *pUserData, CUpti_CallbackDomain domain,
+                                          CUpti_CallbackId callbackId, const void *pCallbackData) {
+  CUPTI_API_CALL(cuptiGetLastError());
+
+  (void)pUserData;
+
+  const CUpti_CallbackData *pCallabckInfo = (CUpti_CallbackData *)pCallbackData;
+
+  switch (domain) {
+    case CUPTI_CB_DOMAIN_STATE:
+      handleDomainStateCallback(callbackId, (CUpti_StateData *)pCallbackData);
+      break;
+    case CUPTI_CB_DOMAIN_RUNTIME_API:
+      switch (callbackId) {
+        case CUPTI_RUNTIME_TRACE_CBID_cudaDeviceReset_v3020:
+          if (pCallabckInfo->callbackSite == CUPTI_API_ENTER)  {
+            CUPTI_API_CALL(cuptiActivityFlushAll(0));
+          }
+          break;
+        default:
+          break;
+      }
+      break;
+    case CUPTI_CB_DOMAIN_SYNCHRONIZE:
+      handleSyncronizationCallbacks(callbackId, (CUpti_SynchronizeData *)pCallbackData);
+      break;
+    default:
+      break;
+  }
+}
+
+// CUPTI callback functions for buffer management
+static void CUPTIAPI cuptiBufferRequested(uint8_t** buffer, size_t* size, size_t* maxNumRecords) {
+  fprintf(stderr, "[CUPTI DEBUG] cuptiBufferRequested called\n");
   
-  if (slurm_job_id && slurm_job_id[0] != '\0') {
-    // Use SLURM job ID for grouping, but actual PID for process identification
-    snprintf(sharedJsonlPath, sizeof(sharedJsonlPath), 
-             "%s/trace_%s_pid%d.jsonl", dirname, slurm_job_id, static_cast<int>(pid));
-  } else {
-    // No SLURM - use timestamp + PID for unique naming
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    snprintf(sharedJsonlPath, sizeof(sharedJsonlPath), 
-             "%s/trace_%ld_pid%d.jsonl", dirname, ts.tv_sec, static_cast<int>(pid));
+  *buffer = (uint8_t *) malloc(CUPTI_BUFFER_SIZE);
+  *size = CUPTI_BUFFER_SIZE;
+  *maxNumRecords = 0;  // Let CUPTI decide
+
+}
+
+static void CUPTIAPI cuptiBufferCompleted(CUcontext ctx, uint32_t streamId, 
+                                          uint8_t* buffer, size_t size, size_t validSize) {
+  fprintf(stderr, "[CUPTI DEBUG] cuptiBufferCompleted called (streamId=%u, size=%zu, validSize=%zu)\n", 
+          streamId, size, validSize);
+  
+  if (validSize > 0 && cuptiActivityEnabled) {
+    
+    CUpti_Activity* record = nullptr;
+    int recordCount = 0;
+    int kernelCount = 0, memcpyCount = 0, memsetCount = 0, extCorrCount = 0;
+    
+    // https://docs.nvidia.com/cupti/12.8/main/main.html#external-correlation
+    // If a CUDA API activity record is generated while any CUpti_ExternalCorrelationKind-stack
+    // on the same CPU thread is non-empty, one CUpti_ActivityExternalCorrelation record per 
+    // CUpti_ExternalCorrelationKind-stack is inserted into the activity buffer before the respective 
+    // CUDA API activity record
+    
+    // Following ncclsee approach: while processing the buffer, track the id from the "previously" 
+    // inserted externnal correlation record to match next record in the buffer
+
+    // track id in previous external correlation record
+    uint64_t previous_external_id = 0;
+    uint32_t previous_correlation_id = 0;
+    
+    // Process all activity records in the buffer
+    do {
+      CUptiResult status = cuptiActivityGetNextRecord(buffer, validSize, &record);
+      if (status != CUPTI_SUCCESS) break;
+      
+      recordCount++;
+      
+      switch (record->kind) {
+        case CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION: {
+          // Store for next kernel/activity record
+          CUpti_ActivityExternalCorrelation* extCorr = (CUpti_ActivityExternalCorrelation*)record;
+          previous_external_id = extCorr->externalId;
+          previous_correlation_id = extCorr->correlationId;
+          extCorrCount++;
+
+          fprintf(stderr, "[CUPTI DEBUG] ExtCorr: corrId=%u -> extId=%llu\n",
+                  previous_correlation_id, (unsigned long long)previous_external_id);
+          break;
+        }
+        case CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL: {
+          CUpti_ActivityKernel4* kernel = (CUpti_ActivityKernel4*)record;
+          kernelCount++;
+
+          // Check if this kernel matches the previous external correlation record
+          // A match means this kernel was launched during an NCCL event we're tracking
+          if (previous_correlation_id == kernel->correlationId) {
+            // // We only care about NCCL kernels
+            // if (strstr(kernel->name, "nccl") == NULL)
+            //   continue;
+            
+            uint64_t extCorrId = previous_external_id;
+            fprintf(stderr, "[CUPTI DEBUG] KERNEL MATCHED: %s, corrId=%u, extCorrId=%llu\n",
+                    kernel->name, kernel->correlationId, (unsigned long long)extCorrId);
+
+            // Only write kernels that are correlated with NCCL events
+            std::string detailsJson = "\"gridX\":" + std::to_string(kernel->gridX) +
+                          ",\"gridY\":" + std::to_string(kernel->gridY) +
+                          ",\"gridZ\":" + std::to_string(kernel->gridZ) +
+                          ",\"blockX\":" + std::to_string(kernel->blockX) +
+                          ",\"blockY\":" + std::to_string(kernel->blockY) +
+                          ",\"blockZ\":" + std::to_string(kernel->blockZ);
+            writeJsonlCuptiActivityRecord(record->kind, kernel->start, kernel->end,
+                                          kernel->correlationId, extCorrId,
+                                          kernel->deviceId, kernel->name,
+                                          (void*)(uintptr_t)kernel->streamId, 0, detailsJson);
+          } else {
+            fprintf(stderr, "[CUPTI DEBUG] KERNEL (no match, skipping): %s, corrId=%u (prev=%u)\n",
+                    kernel->name, kernel->correlationId, previous_correlation_id);
+          }
+          break;
+        }
+        case CUPTI_ACTIVITY_KIND_MEMCPY2: {
+          CUpti_ActivityMemcpy2* memcpy = (CUpti_ActivityMemcpy2*)record;
+          memcpyCount++;
+
+          if (previous_correlation_id == memcpy->correlationId) {
+            uint64_t extCorrId = previous_external_id;
+
+            const char* copyKind = "Unknown";
+            switch (memcpy->copyKind) {
+              case CUPTI_ACTIVITY_MEMCPY_KIND_HTOD: copyKind = "HtoD"; break;
+              case CUPTI_ACTIVITY_MEMCPY_KIND_DTOH: copyKind = "DtoH"; break;
+              case CUPTI_ACTIVITY_MEMCPY_KIND_HTOA: copyKind = "HtoA"; break;
+              case CUPTI_ACTIVITY_MEMCPY_KIND_ATOH: copyKind = "AtoH"; break;
+              case CUPTI_ACTIVITY_MEMCPY_KIND_ATOA: copyKind = "AtoA"; break;
+              case CUPTI_ACTIVITY_MEMCPY_KIND_ATOD: copyKind = "AtoD"; break;
+              case CUPTI_ACTIVITY_MEMCPY_KIND_DTOA: copyKind = "DtoA"; break;
+              case CUPTI_ACTIVITY_MEMCPY_KIND_DTOD: copyKind = "DtoD"; break;
+              case CUPTI_ACTIVITY_MEMCPY_KIND_HTOH: copyKind = "HtoH"; break;
+              case CUPTI_ACTIVITY_MEMCPY_KIND_PTOP: copyKind = "PtoP"; break;
+              default: copyKind = "Unknown"; break;
+            }
+
+            std::string detailsJson = "\"copyKind\":\"" + escapeJsonStringStd(copyKind) + "\"" +
+                          ",\"bytes\":" + std::to_string(memcpy->bytes);
+            writeJsonlCuptiActivityRecord(record->kind, memcpy->start, memcpy->end,
+                                          memcpy->correlationId, extCorrId,
+                                          memcpy->deviceId, copyKind,
+                                          (void*)(uintptr_t)memcpy->streamId, memcpy->bytes, detailsJson);
+          }
+          break;
+        }
+        case CUPTI_ACTIVITY_KIND_MEMSET: {
+          CUpti_ActivityMemset* memset_rec = (CUpti_ActivityMemset*)record;
+          memsetCount++;
+
+          if (previous_correlation_id == memset_rec->correlationId) {
+            uint64_t extCorrId = previous_external_id;
+
+            std::string detailsJson = "\"bytes\":" + std::to_string(memset_rec->bytes) +
+                          ",\"value\":" + std::to_string(memset_rec->value);
+            writeJsonlCuptiActivityRecord(record->kind, memset_rec->start, memset_rec->end,
+                                          memset_rec->correlationId, extCorrId,
+                                          memset_rec->deviceId, "memset",
+                                          (void*)(uintptr_t)memset_rec->streamId, memset_rec->bytes, detailsJson);
+          }
+          break;
+        }
+        default:
+          break;
+      }
+    } while (1);
+    
+    fprintf(stderr, "[CUPTI DEBUG] Processed %d records: %d kernels, %d memcpy, %d memset, %d extCorr\n",
+            recordCount, kernelCount, memcpyCount, memsetCount, extCorrCount);
   }
   
-  // Open in write mode - this file is exclusive to this process, no append/locking needed
-  sharedJsonlFile = fopen(sharedJsonlPath, "w");
-  if (!sharedJsonlFile) {
-    fprintf(stderr, "[MinimalProfiler] WARNING: Failed to open JSONL file: %s\n", sharedJsonlPath);
+  free(buffer);
+}
+
+static double convertCuptiToCpuTime(uint64_t cuptiTimeNs) {
+  return static_cast<double>(cuptiTimeNs) / 1000.0 + cuptiTimestampOffsetUs;
+}
+
+// Capture a timestamp reference pair (CPU time, CUPTI time) to calculate offset
+// Should be called once during initialization
+static void captureCuptiTimestampOffset() {
+  double cpuTimeUs = getTime();
+  uint64_t cuptiTimeNs = 0;
+  CUPTI_API_CALL(cuptiGetTimestamp(&cuptiTimeNs));
+  
+  if (cuptiTimeNs != 0) {
+    double cuptiTimeUs = static_cast<double>(cuptiTimeNs) / 1000.0;
+    cuptiTimestampOffsetUs = cpuTimeUs - cuptiTimeUs;
+  }
+}
+
+// CUPTI init and clean up
+static bool initCuptiActivity() {
+  // 1. Subscribe to CUPTI callback API
+  // 2. Enable specific callbacks
+  // 3. Register function callbacks for buffers
+  // 4. Enable activity kinds
+  // // 5. Additionally push initial correlation ID for pop/push logic
+  
+  CUptiResult cuptiErr;
+  
+  fprintf(stderr, "[CUPTI DEBUG] initCuptiActivity called\n");
+  
+  // Step 1: Subscribe to CUPTI callback API
+  cuptiErr = cuptiSubscribe(&cuptiSubscriber, (CUpti_CallbackFunc)cuptiCallbackHandler, nullptr);
+  if (cuptiErr != CUPTI_SUCCESS) {
+    const char *pErrorString;
+    cuptiGetResultString(cuptiErr, &pErrorString);
+    fprintf(stderr, "[MinimalProfiler] WARNING: %s:%d: cuptiSubscribe failed with error(%d): %s\n",
+            __FILE__, __LINE__, cuptiErr, pErrorString ? pErrorString : "Unknown error");
     return false;
   }
+
+  // Step 2: Enable CUPTI callback on context syncronization, stream syncronization, device reset and fatal errors
+  CUPTI_API_CALL(cuptiEnableCallback(1, cuptiSubscriber, CUPTI_CB_DOMAIN_SYNCHRONIZE, CUPTI_CBID_SYNCHRONIZE_CONTEXT_SYNCHRONIZED));
+  CUPTI_API_CALL(cuptiEnableCallback(1, cuptiSubscriber, CUPTI_CB_DOMAIN_SYNCHRONIZE, CUPTI_CBID_SYNCHRONIZE_STREAM_SYNCHRONIZED));
+  CUPTI_API_CALL(cuptiEnableCallback(1, cuptiSubscriber, CUPTI_CB_DOMAIN_RUNTIME_API, CUPTI_RUNTIME_TRACE_CBID_cudaDeviceReset_v3020));
+  CUPTI_API_CALL(cuptiEnableCallback(1, cuptiSubscriber, CUPTI_CB_DOMAIN_STATE, CUPTI_CBID_STATE_FATAL_ERROR));
   
-  fprintf(stdout, "[MinimalProfiler] JSONL trace file: %s\n", sharedJsonlPath);
+  // Step 3: Register buffer callbacks
+  cuptiErr = cuptiActivityRegisterCallbacks(cuptiBufferRequested, cuptiBufferCompleted);
+  if (cuptiErr != CUPTI_SUCCESS) {
+    const char *pErrorString;
+    cuptiGetResultString(cuptiErr, &pErrorString);
+    fprintf(stderr, "[MinimalProfiler] WARNING: %s:%d: cuptiActivityRegisterCallbacks failed with error(%d): %s\n",
+            __FILE__, __LINE__, cuptiErr, pErrorString ? pErrorString : "Unknown error");
+    return false;
+  }
+
+  // Step 4: Enable activity kinds
+  // Enable DRIVER activity kind
+  CUPTI_API_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_DRIVER));
+  
+  // EXTERNAL_CORRELATION - https://docs.nvidia.com/cupti/12.8/main/main.html#external-correlation
+  CUPTI_API_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION));
+   
+  // specific kinds of interest: CONCURRENT_KERNEL, ... - https://docs.nvidia.com/cupti/api/group__CUPTI__ACTIVITY__API.html#_CPPv418CUpti_ActivityKind
+  CUPTI_API_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL));
+  CUPTI_API_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MEMCPY2));
+  CUPTI_API_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MEMSET));
+  
+  cuptiActivityEnabled = true;
+  fprintf(stdout, "[MinimalProfiler] CUPTI Activity API initialized (following ncclsee pattern)\n");
+  
+  captureCuptiTimestampOffset();
+  
+  // // Step 5: Push initial correlation ID
+  // // This ensures there is a correlation ID on the stack that we can pop initially
+  // uint64_t initialCorrId = nextCorrelationId.fetch_add(1);
+  // CUPTI_API_CALL(cuptiActivityPushExternalCorrelationId(CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM2, initialCorrId));
+  
   return true;
 }
 
-// Close the shared JSONL file (called when last communicator is finalized)
-static void closeSharedJsonlFile() {
-  if (sharedJsonlFile) {
-    fflush(sharedJsonlFile);
-    fclose(sharedJsonlFile);
-    sharedJsonlFile = nullptr;
+static void cleanupCuptiActivity() {
+  fprintf(stderr, "[CUPTI DEBUG] cleanupCuptiActivity called (enabled=%d)\n", cuptiActivityEnabled);
+  
+  if (!cuptiActivityEnabled) return;
+  
+  CUPTI_API_CALL(cuptiGetLastError());
+  
+  CUPTI_API_CALL(cuptiActivityFlushAll(0)); // pass 1?
+
+  if (cuptiSubscriber) {
+    CUPTI_API_CALL(cuptiUnsubscribe(cuptiSubscriber));
+    cuptiSubscriber = nullptr;
   }
+  
+  CUPTI_API_CALL(cuptiFinalize());
+
+  cuptiActivityEnabled = false;
+  
+  fprintf(stderr, "[CUPTI DEBUG] CUPTI cleanup complete\n");
 }
+
+// ============================================================================
+// Section 7: Logging
+// ============================================================================
 
 // ----------------------------------------------------------------------------
 // Directory and File Helpers
@@ -837,350 +1177,147 @@ static int ensureDumpDir(const char* dirname) {
   return 0;
 }
 
-// ============================================================================
-// CUPTI Activity API Module for JSONL Activity Record Dumping
-// ============================================================================
-// This module captures CUDA activity records (kernels, memcpy, etc.) that have
-// external correlation IDs matching our NCCL events. By writing these to the
-// same JSONL file, post-processing tools can correlate NCCL communication events
-// with the CUDA kernels that triggered them.
-// ============================================================================
+// ----------------------------------------------------------------------------
+// JSON/JSONL Utility Functions
+// ----------------------------------------------------------------------------
 
-// Global CUPTI Activity state
-static pthread_mutex_t cuptiActivityMutex = PTHREAD_MUTEX_INITIALIZER;
-static bool cuptiActivityEnabled = false;
-static uint8_t* cuptiBufferPool[2] = {nullptr, nullptr};
-static size_t cuptiBufferSize = 1024 * 1024;  // 1MB buffers
-static int cuptiBufferIndex = 0;
-
-// CUPTI buffer callback - called when buffer is full
-void CUPTIAPI cuptiBufferRequested(uint8_t** buffer, size_t* size, size_t* maxNumRecords) {
-  // Allocate buffer from pool
-  if (cuptiBufferPool[cuptiBufferIndex] == nullptr) {
-    cuptiBufferPool[cuptiBufferIndex] = (uint8_t*)malloc(cuptiBufferSize);
-  }
+static std::string escapeJsonStringStd(const char* input) {
+  if (!input) return "";
   
-  *buffer = cuptiBufferPool[cuptiBufferIndex];
-  *size = cuptiBufferSize;
-  *maxNumRecords = 0;  // Let CUPTI decide
-}
-
-// CUPTI buffer completed callback - called when buffer is ready to process
-void CUPTIAPI cuptiBufferCompleted(CUcontext ctx, uint32_t streamId, 
-                                     uint8_t* buffer, size_t size, size_t validSize) {
-  if (validSize == 0 || !cuptiActivityEnabled) {
-    return;
-  }
+  std::string result;
   
-  CUptiResult status;
-  CUpti_Activity* record = nullptr;
+  // Reserve enough space if every character would need escaping in advance
+  result.reserve(strlen(input) * 2);  
   
-  // Process all activity records in the buffer
-  do {
-    status = cuptiActivityGetNextRecord(buffer, validSize, &record);
-    
-    if (status == CUPTI_SUCCESS) {
-      processCuptiActivityRecord(record);
-    } else if (status == CUPTI_ERROR_MAX_LIMIT_REACHED) {
-      break;
-    }
-  } while (status == CUPTI_SUCCESS);
-  
-  // Switch to other buffer
-  cuptiBufferIndex = (cuptiBufferIndex + 1) % 2;
-}
-
-// Write a CUPTI activity record to JSONL (matches your JSONL style)
-static void writeJsonlCuptiActivityRecord(uint32_t kind, uint64_t startTime, uint64_t endTime,
-                                          uint32_t correlationId, uint64_t externalCorrelationId,
-                                          uint32_t deviceId, const char* name, void* stream,
-                                          size_t size, const std::string& detailsJson) {
-  if (!sharedJsonlFile) return;
-  
-  double currentTime = getTime();
-  pid_t tid = getTid();
-  pid_t pid = getpid();
-  
-  // Convert CUPTI timestamps (nanoseconds) to microseconds (matching your format)
-  char startBuf[64], endBuf[64], durationBuf[64];
-  snprintf(startBuf, sizeof(startBuf), "%.3f", startTime / 1000.0);  // ns -> us
-  snprintf(endBuf, sizeof(endBuf), "%.3f", endTime / 1000.0);
-  snprintf(durationBuf, sizeof(durationBuf), "%.3f", (endTime - startTime) / 1000.0);
-  
-  const char* kindName = "Unknown";
-  switch (kind) {
-    case CUPTI_ACTIVITY_KIND_KERNEL:
-    case CUPTI_ACTIVITY_KIND_KERNEL1:
-    case CUPTI_ACTIVITY_KIND_KERNEL2:
-    case CUPTI_ACTIVITY_KIND_KERNEL3:
-    case CUPTI_ACTIVITY_KIND_KERNEL4:
-      kindName = "KERNEL";
-      break;
-    case CUPTI_ACTIVITY_KIND_MEMCPY:
-      kindName = "MEMCPY";
-      break;
-    case CUPTI_ACTIVITY_KIND_MEMSET:
-      kindName = "MEMSET";
-      break;
-    default:
-      kindName = "OTHER";
-      break;
-  }
-  
-  // Build JSONL record (matching your style)
-  std::string json = "{\"recordType\":\"cuptiActivity\"" +
-                     ",\"type\":\"" + escapeJsonStringStd(kindName) + "\"" +
-                     ",\"extCorrId\":" + std::to_string(externalCorrelationId) +
-                     ",\"corrId\":" + std::to_string(correlationId) +
-                     ",\"deviceId\":" + std::to_string(deviceId) +
-                     ",\"start\":{\"ts\":" + std::string(startBuf) +
-                     ",\"pid\":" + std::to_string(static_cast<int>(pid)) +
-                     ",\"tid\":" + std::to_string(static_cast<int>(tid)) + "}" +
-                     ",\"stop\":{\"ts\":" + std::string(endBuf) +
-                     ",\"pid\":" + std::to_string(static_cast<int>(pid)) +
-                     ",\"tid\":" + std::to_string(static_cast<int>(tid)) + "}" +
-                     ",\"duration\":" + std::string(durationBuf) +
-                     ",\"myPid\":" + std::to_string(static_cast<int>(profilerPid));
-  
-  if (name) {
-    json += ",\"name\":\"" + escapeJsonStringStd(name) + "\"";
-  }
-  
-  if (stream) {
-    json += ",\"stream\":\"" + formatPointerStd(stream) + "\"";
-  }
-  
-  if (size > 0) {
-    json += ",\"size\":" + std::to_string(size);
-  }
-  
-  if (!detailsJson.empty()) {
-    json += ",\"details\":{" + detailsJson + "}";
-  }
-  
-  json += "}\n";
-  
-  // Write to per-process JSONL file (same file as NCCL events)
-  pthread_mutex_lock(&jsonlFileMutex);
-  if (sharedJsonlFile) {
-    int fd = fileno(sharedJsonlFile);
-    if (fd >= 0) {
-      ssize_t written = write(fd, json.c_str(), json.size());
-      (void)written;  // Ignore return value (same as your code)
-    }
-  }
-  pthread_mutex_unlock(&jsonlFileMutex);
-}
-
-// Process a single activity record
-static void processCuptiActivityRecord(CUpti_Activity* record) {
-  uint64_t externalCorrelationId = 0;
-  uint32_t correlationId = 0;
-  uint64_t startTime = 0;
-  uint64_t endTime = 0;
-  uint32_t deviceId = 0;
-  const char* name = nullptr;
-  void* stream = nullptr;
-  size_t size = 0;
-  std::string detailsJson;
-  
-  switch (record->kind) {
-    case CUPTI_ACTIVITY_KIND_KERNEL:
-    case CUPTI_ACTIVITY_KIND_KERNEL1:
-    case CUPTI_ACTIVITY_KIND_KERNEL2:
-    case CUPTI_ACTIVITY_KIND_KERNEL3:
-    case CUPTI_ACTIVITY_KIND_KERNEL4: {
-      CUpti_ActivityKernel3* kernel = (CUpti_ActivityKernel3*)record;
-      startTime = kernel->start;
-      endTime = kernel->end;
-      correlationId = kernel->correlationId;
-      deviceId = kernel->deviceId;
-      stream = (void*)(uintptr_t)kernel->streamId;
-      name = kernel->name;
-      
-      // Get external correlation IDs
-      CUpti_ActivityExternalCorrelation* extCorr = nullptr;
-      CUptiResult status = cuptiActivityGetAttribute(
-        record, CUPTI_ACTIVITY_ATTR_EXTERNAL_CORRELATION_ID, 
-        sizeof(CUpti_ActivityExternalCorrelation), &extCorr);
-      
-      if (status == CUPTI_SUCCESS && extCorr) {
-        // Check for our custom correlation kind
-        for (int i = 0; i < extCorr->externalIdCount; i++) {
-          if (extCorr->externalIdKind[i] == CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM0) {
-            externalCorrelationId = extCorr->externalId[i];
-            break;
-          }
+  for (size_t i = 0; input[i] != '\0'; i++) {
+    char c = input[i];
+    switch (c) {
+      case '"':  result += "\\\""; break;
+      case '\\': result += "\\\\"; break;
+      case '\n': result += "\\n"; break;
+      case '\r': result += "\\r"; break;
+      case '\t': result += "\\t"; break;
+      default:
+        if (c >= 32 && c < 127) {  // Printable ASCII
+          result += c;
         }
-      }
-      
-      // Build details JSON (matching your style)
-      detailsJson = "\"gridX\":" + std::to_string(kernel->gridX) +
-                    ",\"gridY\":" + std::to_string(kernel->gridY) +
-                    ",\"gridZ\":" + std::to_string(kernel->gridZ) +
-                    ",\"blockX\":" + std::to_string(kernel->blockX) +
-                    ",\"blockY\":" + std::to_string(kernel->blockY) +
-                    ",\"blockZ\":" + std::to_string(kernel->blockZ) +
-                    ",\"registersPerThread\":" + std::to_string(kernel->registersPerThread) +
-                    ",\"staticSharedMemory\":" + std::to_string(kernel->staticSharedMemory) +
-                    ",\"dynamicSharedMemory\":" + std::to_string(kernel->dynamicSharedMemory) +
-                    ",\"localMemoryPerThread\":" + std::to_string(kernel->localMemoryPerThread) +
-                    ",\"localMemoryTotal\":" + std::to_string(kernel->localMemoryTotal) +
-                    ",\"sharedMemoryExecuted\":" + std::to_string(kernel->sharedMemoryExecuted);
-      break;
+        // Skip non-printable characters
+        break;
     }
-    
-    case CUPTI_ACTIVITY_KIND_MEMCPY: {
-      CUpti_ActivityMemcpy* memcpy = (CUpti_ActivityMemcpy*)record;
-      startTime = memcpy->start;
-      endTime = memcpy->end;
-      correlationId = memcpy->correlationId;
-      deviceId = memcpy->deviceId;
-      size = memcpy->bytes;
-      
-      // Get external correlation IDs
-      CUpti_ActivityExternalCorrelation* extCorr = nullptr;
-      cuptiActivityGetAttribute(record, CUPTI_ACTIVITY_ATTR_EXTERNAL_CORRELATION_ID,
-                                  sizeof(CUpti_ActivityExternalCorrelation), &extCorr);
-      if (extCorr) {
-        for (int i = 0; i < extCorr->externalIdCount; i++) {
-          if (extCorr->externalIdKind[i] == CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM0) {
-            externalCorrelationId = extCorr->externalId[i];
-            break;
-          }
-        }
-      }
-      
-      const char* copyKind = "";
-      switch (memcpy->copyKind) {
-        case CUPTI_ACTIVITY_MEMCPY_KIND_HTOD: copyKind = "HtoD"; break;
-        case CUPTI_ACTIVITY_MEMCPY_KIND_DTOH: copyKind = "DtoH"; break;
-        case CUPTI_ACTIVITY_MEMCPY_KIND_HTOA: copyKind = "HtoA"; break;
-        case CUPTI_ACTIVITY_MEMCPY_KIND_ATOH: copyKind = "AtoH"; break;
-        case CUPTI_ACTIVITY_MEMCPY_KIND_ATOA: copyKind = "AtoA"; break;
-        case CUPTI_ACTIVITY_MEMCPY_KIND_ATOD: copyKind = "AtoD"; break;
-        case CUPTI_ACTIVITY_MEMCPY_KIND_DTOA: copyKind = "DtoA"; break;
-        case CUPTI_ACTIVITY_MEMCPY_KIND_DTOD: copyKind = "DtoD"; break;
-        default: copyKind = "Unknown"; break;
-      }
-      
-      detailsJson = "\"copyKind\":\"" + escapeJsonStringStd(copyKind) + "\"" +
-                    ",\"bytes\":" + std::to_string(memcpy->bytes);
-      break;
-    }
-    
-    case CUPTI_ACTIVITY_KIND_MEMSET: {
-      CUpti_ActivityMemset* memset = (CUpti_ActivityMemset*)record;
-      startTime = memset->start;
-      endTime = memset->end;
-      correlationId = memset->correlationId;
-      deviceId = memset->deviceId;
-      size = memset->bytes;
-      
-      // Get external correlation IDs
-      CUpti_ActivityExternalCorrelation* extCorr = nullptr;
-      cuptiActivityGetAttribute(record, CUPTI_ACTIVITY_ATTR_EXTERNAL_CORRELATION_ID,
-                                  sizeof(CUpti_ActivityExternalCorrelation), &extCorr);
-      if (extCorr) {
-        for (int i = 0; i < extCorr->externalIdCount; i++) {
-          if (extCorr->externalIdKind[i] == CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM0) {
-            externalCorrelationId = extCorr->externalId[i];
-            break;
-          }
-        }
-      }
-      
-      detailsJson = "\"bytes\":" + std::to_string(memset->bytes) +
-                    ",\"value\":" + std::to_string(memset->value);
-      break;
-    }
-    
-    default:
-      // Unknown activity type - skip
-      return;
   }
-  
-  // Only write records with external correlation IDs (from our NCCL events)
-  if (externalCorrelationId != 0) {
-    writeJsonlCuptiActivityRecord(record->kind, startTime, endTime, correlationId,
-                                   externalCorrelationId, deviceId, name, stream, size, detailsJson);
-  }
+  return result;
 }
 
-// Initialize CUPTI Activity API
-static bool initCuptiActivity() {
-  CUptiResult cuptiErr;
+static std::string formatPointerStd(const void* ptr) {
+  char buf[32];
+  if (ptr) {
+    snprintf(buf, sizeof(buf), "0x%lx", reinterpret_cast<unsigned long>(ptr));
+  } else {
+    snprintf(buf, sizeof(buf), "null");
+  }
+  return std::string(buf);
+}
+
+// Initialize the per-process JSONL trace file (called on first communicator init)
+static bool initJsonlTraceFile(const char* dirname) {
+  if (ensureDumpDir(dirname) != 0) {
+    return false;
+  }
+
+  snprintf(sharedJsonlPath, sizeof(sharedJsonlPath), 
+            "%s/trace_pid%d.jsonl", dirname, static_cast<int>(getpid()));
   
-  // Register callbacks
-  cuptiErr = cuptiActivityRegisterCallbacks(cuptiBufferRequested, cuptiBufferCompleted);
-  if (cuptiErr != CUPTI_SUCCESS) {
-    fprintf(stderr, "[MinimalProfiler] Failed to register CUPTI activity callbacks: %d\n", cuptiErr);
+  // Open in write mode - this file is exclusive to this process, no append/locking needed
+  sharedJsonlFile = fopen(sharedJsonlPath, "w");
+  if (!sharedJsonlFile) {
+    fprintf(stderr, "[MinimalProfiler] WARNING: Failed to open JSONL file: %s\n", sharedJsonlPath);
     return false;
   }
   
-  // Enable activity kinds we care about
-  cuptiErr = cuptiActivityEnable(CUPTI_ACTIVITY_KIND_KERNEL);
-  if (cuptiErr != CUPTI_SUCCESS) {
-    fprintf(stderr, "[MinimalProfiler] WARNING: Failed to enable KERNEL activities: %d\n", cuptiErr);
-  }
-  
-  cuptiErr = cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MEMCPY);
-  if (cuptiErr != CUPTI_SUCCESS) {
-    fprintf(stderr, "[MinimalProfiler] WARNING: Failed to enable MEMCPY activities: %d\n", cuptiErr);
-  }
-  
-  cuptiErr = cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MEMSET);
-  if (cuptiErr != CUPTI_SUCCESS) {
-    fprintf(stderr, "[MinimalProfiler] WARNING: Failed to enable MEMSET activities: %d\n", cuptiErr);
-  }
-  
-  cuptiErr = cuptiActivityEnable(CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION);
-  if (cuptiErr != CUPTI_SUCCESS) {
-    fprintf(stderr, "[MinimalProfiler] WARNING: Failed to enable EXTERNAL_CORRELATION activities: %d\n", cuptiErr);
-  }
-  
-  cuptiActivityEnabled = true;
-  fprintf(stdout, "[MinimalProfiler] CUPTI Activity API initialized (writing to JSONL)\n");
-  
+  fprintf(stdout, "[MinimalProfiler] JSONL trace file: %s\n", sharedJsonlPath);
   return true;
 }
 
-// Flush remaining activity records
-static void flushCuptiActivities() {
-  if (!cuptiActivityEnabled) return;
-  
-  CUptiResult cuptiErr = cuptiActivityFlushAll(0);
-  if (cuptiErr != CUPTI_SUCCESS && cuptiErr != CUPTI_ERROR_NOT_READY) {
-    fprintf(stderr, "[MinimalProfiler] WARNING: Failed to flush CUPTI activities: %d\n", cuptiErr);
+// Close the shared JSONL file (called when last communicator is finalized)
+static void closeSharedJsonlFile() {
+  if (sharedJsonlFile) {
+    fflush(sharedJsonlFile);
+    fclose(sharedJsonlFile);
+    sharedJsonlFile = nullptr;
   }
 }
 
-// Cleanup CUPTI Activity API
-static void cleanupCuptiActivity() {
-  if (!cuptiActivityEnabled) return;
-  
-  // Flush any remaining activities
-  flushCuptiActivities();
-  
-  // Free buffers
-  for (int i = 0; i < 2; i++) {
-    if (cuptiBufferPool[i]) {
-      free(cuptiBufferPool[i]);
-      cuptiBufferPool[i] = nullptr;
-    }
-  }
-  
-  cuptiActivityEnabled = false;
-}
-
 // ----------------------------------------------------------------------------
-// JSONL Writers - Separate Records for Events and States
+// JSONL Writers - Separate Records for Events and States and CUPTI records
 // ----------------------------------------------------------------------------
-// Each JSONL line is small and atomic (<3KB). No buffering needed.
 // - "event" records: written at STOP time with start/stop info and details
 // - "state" records: written immediately at STATE time with eventAddr reference
-// The visualizer reconstructs full events by matching states to their eventAddr.
 // ----------------------------------------------------------------------------
+
+// Write an event record to JSONL (called at STOP time - no state transitions)
+static void writeJsonlEventRecord(MyEvent* event) {
+  if (!event || !sharedJsonlFile) return;
+
+  double stopTime = getTime();
+  double duration = (stopTime - event->startTime);
+  pid_t stopPid = getpid();
+  pid_t stopTid = getTid();
+  
+  // Build the event JSON - (event states are separate records)
+  std::string json = "{\"recordType\":\"event\"" +
+                     std::string(",\"type\":\"") + escapeJsonStringStd(event->typeName ? event->typeName : "Unknown") + "\"";
+  
+  if (!event->isPxn) {
+    // Normal event - include gpuUuid, commId, rank, ctx
+    json += ",\"gpuUuid\":\"" + escapeJsonStringStd(event->gpuUuid[0] != '\0' ? event->gpuUuid : "") + "\"" +
+            ",\"commId\":" + std::to_string(event->commId) +
+            ",\"rank\":" + std::to_string(event->rank);
+  }
+  
+  // Start/stop timestamps
+  char buf[64];
+  snprintf(buf, sizeof(buf), "%.3f", event->startTime);
+  json += ",\"start\":{\"ts\":" + std::string(buf) +
+          ",\"pid\":" + std::to_string(static_cast<int>(event->startPid)) +
+          ",\"tid\":" + std::to_string(static_cast<int>(event->startTid)) + "}";
+  
+  snprintf(buf, sizeof(buf), "%.3f", stopTime);
+  json += ",\"stop\":{\"ts\":" + std::string(buf) +
+          ",\"pid\":" + std::to_string(static_cast<int>(stopPid)) +
+          ",\"tid\":" + std::to_string(static_cast<int>(stopTid)) + "}";
+  
+  snprintf(buf, sizeof(buf), "%.3f", duration);
+  json += ",\"duration\":" + std::string(buf);
+  
+  // Add external correlation ID if present (links to CUPTI activity records)
+  if (event->hasExternalCorrelationId) {
+    json += ",\"extCorrId\":" + std::to_string(event->externalCorrelationId);
+  }
+  
+  json += ",\"parentObj\":\"" + formatPointerStd(event->parentObj) + "\"" +
+          ",\"eventAddr\":\"" + formatPointerStd(static_cast<void*>(event)) + "\"";
+  
+  if (!event->isPxn && event->ctx) {
+    json += ",\"ctx\":\"" + formatPointerStd(static_cast<void*>(event->ctx)) + "\"";
+    }
+  
+  if (event->isPxn) {
+    json += ",\"isPxn\":true";
+  }
+  
+  // Add details
+  json += ",\"details\":{" + event->typeDetails + "}}\n";
+  
+  // event state transitions are not added. currently they are separate records
+
+  // Write to per-process file
+  pthread_mutex_lock(&jsonlFileMutex);
+  if (fileno(sharedJsonlFile) >= 0) {
+    int fd = fileno(sharedJsonlFile);
+    write(fd, json.c_str(), json.size());
+  }
+  pthread_mutex_unlock(&jsonlFileMutex);
+}
 
 // Write a state transition record to JSONL (called immediately at STATE time)
 static void writeJsonlStateRecord(MyEvent* event, double timestamp, const char* stateName,
@@ -1205,85 +1342,14 @@ static void writeJsonlStateRecord(MyEvent* event, double timestamp, const char* 
   
   // Write to per-process file
   pthread_mutex_lock(&jsonlFileMutex);
-  if (sharedJsonlFile) {
+  if (fileno(sharedJsonlFile) >= 0) {
     int fd = fileno(sharedJsonlFile);
-    if (fd >= 0) {
-      ssize_t written = write(fd, json.c_str(), json.size());
-      (void)written;
-    }
-  }
-  pthread_mutex_unlock(&jsonlFileMutex);
-}
-
-// Write an event record to JSONL (called at STOP time - no embedded states)
-static void writeJsonlEventRecord(MyEvent* event, double endTime, double duration, pid_t stopTid) {
-  if (!event || !sharedJsonlFile) return;
-  
-  // Build the event JSON - (event states are separate records)
-  std::string json = "{\"recordType\":\"event\"" +
-                     std::string(",\"type\":\"") + escapeJsonStringStd(event->typeName ? event->typeName : "Unknown") + "\"";
-  
-  if (!event->fromDetachPool) {
-    // Normal event - include gpuUuid, commId, rank, ctx
-    json += ",\"gpuUuid\":\"" + escapeJsonStringStd(event->gpuUuid[0] != '\0' ? event->gpuUuid : "") + "\"" +
-            ",\"commId\":" + std::to_string(event->commId) +
-            ",\"rank\":" + std::to_string(event->rank);
-  }
-  
-  // Start/stop timestamps
-  char buf[64];
-  snprintf(buf, sizeof(buf), "%.3f", event->startTime);
-  json += ",\"start\":{\"ts\":" + std::string(buf) +
-          ",\"pid\":" + std::to_string(static_cast<int>(event->startPid)) +
-          ",\"tid\":" + std::to_string(static_cast<int>(event->startTid)) + "}";
-  
-  snprintf(buf, sizeof(buf), "%.3f", endTime);
-  json += ",\"stop\":{\"ts\":" + std::string(buf) +
-          ",\"pid\":" + std::to_string(static_cast<int>(getpid())) +
-          ",\"tid\":" + std::to_string(static_cast<int>(stopTid)) + "}";
-  
-  snprintf(buf, sizeof(buf), "%.3f", duration);
-  json += ",\"duration\":" + std::string(buf);
-  
-  json += ",\"myPid\":" + std::to_string(static_cast<int>(profilerPid));
-  
-  // Add external correlation ID if present (links to CUPTI activity records)
-  if (event->hasExternalCorrelationId) {
-    json += ",\"extCorrId\":" + std::to_string(event->externalCorrelationId);
-  }
-  
-  if (event->fromDetachPool) {
-    json += ",\"originPid\":" + std::to_string(static_cast<int>(event->originPid));
-  }
-  
-  json += ",\"parentObj\":\"" + formatPointerStd(event->parentObj) + "\"" +
-          ",\"eventAddr\":\"" + formatPointerStd(static_cast<void*>(event)) + "\"";
-  
-  if (!event->fromDetachPool && event->ctx) {
-    json += ",\"ctx\":\"" + formatPointerStd(static_cast<void*>(event->ctx)) + "\"";
-  }
-  
-  if (event->fromDetachPool) {
-    json += ",\"isPxn\":true";
-  }
-  
-  // Add details (no states array - states are separate records)
-  json += ",\"details\":{" + event->startDetails + "}}\n";
-  
-  // Write to per-process file
-  pthread_mutex_lock(&jsonlFileMutex);
-  if (sharedJsonlFile) {
-    int fd = fileno(sharedJsonlFile);
-    if (fd >= 0) {
-      ssize_t written = write(fd, json.c_str(), json.size());
-      (void)written;
-    }
+    write(fd, json.c_str(), json.size());
   }
   pthread_mutex_unlock(&jsonlFileMutex);
 }
 
 // Write a ProfilerLifecycle pseudo-event to JSONL
-// Uses dynamic std::string - no fixed buffer size limits
 static void writeJsonlLifecycleEvent(const char* action, double timestamp, 
                                       const char* gpuUuid, uint64_t commId, int rank,
                                       const std::string& detailsJson) {
@@ -1306,78 +1372,97 @@ static void writeJsonlLifecycleEvent(const char* action, double timestamp,
                      ",\"pid\":" + std::to_string(static_cast<int>(pid)) +
                      ",\"tid\":" + std::to_string(static_cast<int>(tid)) + "}" +
                      ",\"duration\":0.0" +
-                     ",\"myPid\":" + std::to_string(static_cast<int>(profilerPid)) +
                      ",\"details\":{" + detailsJson + "}}\n";
   
   // Write to per-process file
   pthread_mutex_lock(&jsonlFileMutex);
-  if (sharedJsonlFile) {
+  if (fileno(sharedJsonlFile) >= 0) {
     int fd = fileno(sharedJsonlFile);
-    if (fd >= 0) {
-      ssize_t written = write(fd, json.c_str(), json.size());
-      (void)written;
-    }
+    write(fd, json.c_str(), json.size());
   }
   pthread_mutex_unlock(&jsonlFileMutex);
 }
 
-// ----------------------------------------------------------------------------
-// Type and State Name Mappers
-// ----------------------------------------------------------------------------
-
-// Get human-readable event type name
-static const char* getEventTypeName(uint64_t type) {
-  switch (type) {
-    case ncclProfileGroupApi:     return "ncclProfileGroupApi";
-    case ncclProfileCollApi:      return "ncclProfileCollApi";
-    case ncclProfileP2pApi:       return "ncclProfileP2pApi";
-    case ncclProfileKernelLaunch: return "ncclProfileKernelLaunch";
-    case ncclProfileColl:         return "ncclProfileColl";
-    case ncclProfileP2p:          return "ncclProfileP2p";
-    case ncclProfileProxyOp:      return "ncclProfileProxyOp";
-    case ncclProfileProxyStep:    return "ncclProfileProxyStep";
-    case ncclProfileProxyCtrl:    return "ncclProfileProxyCtrl";
-    case ncclProfileKernelCh:     return "ncclProfileKernelCh";
-    case ncclProfileNetPlugin:    return "ncclProfileNetPlugin";
-    case ncclProfileGroup:        return "ncclProfileGroup";
-    default:                      return "ncclProfileUnknown";
+// Write a CUPTI activity record to JSONL
+static void writeJsonlCuptiActivityRecord(uint32_t kind, uint64_t startTime, uint64_t endTime,
+                                          uint32_t correlationId, uint64_t externalCorrelationId,
+                                          uint32_t deviceId, const char* name, void* stream,
+                                          size_t size, const std::string& detailsJson) {
+  if (!sharedJsonlFile) return;
+  
+  pid_t tid = getTid();
+  pid_t pid = getpid();
+  std::string gpuUuid = getGpuUuid();
+  
+  char startBuf[64], endBuf[64], durationBuf[64];
+  double startTimeUs = convertCuptiToCpuTime(startTime);
+  double endTimeUs = convertCuptiToCpuTime(endTime);
+  double durationUs = endTimeUs - startTimeUs;
+  
+  snprintf(startBuf, sizeof(startBuf), "%.3f", startTimeUs);
+  snprintf(endBuf, sizeof(endBuf), "%.3f", endTimeUs);
+  snprintf(durationBuf, sizeof(durationBuf), "%.3f", durationUs);
+  
+  const char* kindName = "Unknown";
+  switch (kind) {
+    case CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL:
+      kindName = "KERNEL";
+      break;
+    case CUPTI_ACTIVITY_KIND_MEMCPY2:
+      kindName = "MEMCPY";
+      break;
+    case CUPTI_ACTIVITY_KIND_MEMSET:
+      kindName = "MEMSET";
+      break;
+    default:
+      kindName = "OTHER";
+      break;
   }
-}
-
-// Get human-readable state name
-static const char* getStateName(ncclProfilerEventState_v5_t eState) {
-  switch (eState) {
-    case ncclProfilerProxyOpSendPosted:        return "ProxyOpSendPosted (deprecated)";
-    case ncclProfilerProxyOpSendRemFifoWait:   return "ProxyOpSendRemFifoWait (deprecated)";
-    case ncclProfilerProxyOpSendTransmitted:   return "ProxyOpSendTransmitted (deprecated)";
-    case ncclProfilerProxyOpSendDone:          return "ProxyOpSendDone (deprecated)";
-    case ncclProfilerProxyOpRecvPosted:        return "ProxyOpRecvPosted (deprecated)";
-    case ncclProfilerProxyOpRecvReceived:      return "ProxyOpRecvReceived (deprecated)";
-    case ncclProfilerProxyOpRecvTransmitted:   return "ProxyOpRecvTransmitted (deprecated)";
-    case ncclProfilerProxyOpRecvDone:          return "ProxyOpRecvDone (deprecated)";
-    case ncclProfilerProxyStepSendGPUWait:     return "ProxyStepSendGPUWait";
-    case ncclProfilerProxyStepSendWait:        return "ProxyStepSendWait";
-    case ncclProfilerProxyStepRecvWait:        return "ProxyStepRecvWait";
-    case ncclProfilerProxyStepRecvFlushWait:   return "ProxyStepRecvFlushWait";
-    case ncclProfilerProxyStepRecvGPUWait:     return "ProxyStepRecvGPUWait";
-    case ncclProfilerProxyCtrlIdle:            return "ProxyCtrlIdle";
-    case ncclProfilerProxyCtrlActive:          return "ProxyCtrlActive";
-    case ncclProfilerProxyCtrlSleep:           return "ProxyCtrlSleep";
-    case ncclProfilerProxyCtrlWakeup:          return "ProxyCtrlWakeup";
-    case ncclProfilerProxyCtrlAppend:          return "ProxyCtrlAppend";
-    case ncclProfilerProxyCtrlAppendEnd:       return "ProxyCtrlAppendEnd";
-    case ncclProfilerProxyOpInProgress_v4:     return "ProxyOpInProgress";
-    case ncclProfilerProxyStepSendPeerWait_v4: return "ProxyStepSendPeerWait";
-    case ncclProfilerNetPluginUpdate:          return "NetPluginUpdate";
-    case ncclProfilerKernelChStop:             return "KernelChStop";
-    case ncclProfilerEndGroupApiStart:         return "EndGroupApiStart";
-    case ncclProfilerBeginGroupApiEnd:         return "BeginGroupApiEnd";
-    default:                                   return "Unknown";
+  
+  // Build JSONL record
+  std::string json = std::string("{\"recordType\":\"cuptiActivity\"") +
+                     ",\"type\":\"" + escapeJsonStringStd(kindName) + "\"" +
+                     ",\"extCorrId\":" + std::to_string(externalCorrelationId) +
+                     ",\"corrId\":" + std::to_string(correlationId) +
+                     ",\"gpuUuid\":\"" + escapeJsonStringStd(gpuUuid.c_str()) + "\"" +
+                     ",\"deviceId\":" + std::to_string(deviceId) +
+                     ",\"start\":{\"ts\":" + std::string(startBuf) +
+                     ",\"pid\":" + std::to_string(static_cast<int>(pid)) +
+                     ",\"tid\":" + std::to_string(static_cast<int>(tid)) + "}" +
+                     ",\"stop\":{\"ts\":" + std::string(endBuf) +
+                     ",\"pid\":" + std::to_string(static_cast<int>(pid)) +
+                     ",\"tid\":" + std::to_string(static_cast<int>(tid)) + "}" +
+                     ",\"duration\":" + std::string(durationBuf);
+  
+  if (name) {
+    json += ",\"name\":\"" + escapeJsonStringStd(name) + "\"";
   }
+  
+  if (stream) {
+    json += ",\"stream\":\"" + formatPointerStd(stream) + "\"";
+  }
+  
+  if (size > 0) {
+    json += ",\"size\":" + std::to_string(size);
+  }
+  
+  if (!detailsJson.empty()) {
+    json += ",\"details\":{" + detailsJson + "}";
+  }
+  
+  json += "}\n";
+  
+  // Write to per-process JSONL file (same file as NCCL events)
+  pthread_mutex_lock(&jsonlFileMutex);
+  if (fileno(sharedJsonlFile) >= 0) {
+    int fd = fileno(sharedJsonlFile);
+    write(fd, json.c_str(), json.size());
+  }
+  pthread_mutex_unlock(&jsonlFileMutex);
 }
 
 // ============================================================================
-// SECTION 5: Profiler API Implementation
+// SECTION 8: Profiler API Implementation
 // ============================================================================
 extern "C" {
 
@@ -1391,108 +1476,58 @@ ncclResult_t myInit(void** context, uint64_t commId, int* eActivationMask,
   const char* maskStr = getenv(ENV_EVENT_MASK);
   int mask = maskStr ? atoi(maskStr) : 4095;  // Default: enable ALL event types
   *eActivationMask = mask;
+  
   pid_t tid = getTid();
+  pid_t pid = getpid();
+  std::string gpuUuidStr = getGpuUuid();
   
-  fprintf(stdout, "[MinimalProfiler] Init called: tid=%d, rank=%d/%d, commId=%lu, eventMask=0x%x\n",
-          tid, rank, nranks, commId, mask);
+  fprintf(stdout, "[MinimalProfiler] Init called: pid=%d, tid=%d, rank=%d/%d, commId=%lu, eventMask=0x%x\n",
+          static_cast<int>(pid), tid, rank, nranks, commId, mask);
   
-  // Get dump directory name (needed for JSONL trace file)
+  // Get dump directory name
   char dirname[256];
   if (!getDumpDir(dirname, sizeof(dirname))) {
-    return ncclSystemError;
-  }
-  
-  // Create dump directory (safe to call multiple times)
-  if (ensureDumpDir(dirname) != 0) {
-    return ncclSystemError;
+    return ncclInternalError;
   }
   
   // Initialize process-wide state on first communicator init
   pthread_mutex_lock(&processStateMutex);
   if (activeContextCount == 0) {
-    profilerPid = getpid();
-    firstCommId = commId;  // Store commId for this profiler instance
-    
-    if (initPxnDetachPool()) {
-      fprintf(stdout, "[MinimalProfiler] Init: profilerPid=%d, firstCommId=%lu\n",
-              static_cast<int>(profilerPid), firstCommId);
-    } else {
-      fprintf(stderr, "[MinimalProfiler] WARNING: Failed to initialize detach pool\n");
-    }
-    
-    // Initialize per-process JSONL trace file
-    if (initSharedJsonlFile(dirname)) {
-      fprintf(stdout, "[MinimalProfiler] JSONL trace file initialized\n");
-    } else {
-      fprintf(stderr, "[MinimalProfiler] WARNING: Failed to initialize JSONL file\n");
-    }
-    
-    // Initialize CUPTI Activity API (writes to same JSONL file)
-    if (initCuptiActivity()) {
-      fprintf(stdout, "[MinimalProfiler] CUPTI Activity API initialized\n");
-    } else {
-      fprintf(stderr, "[MinimalProfiler] WARNING: CUPTI Activity API failed\n");
-    }
+    initProcessResources(dirname);
   }
   activeContextCount++;
   pthread_mutex_unlock(&processStateMutex);
   
-  // Allocate context
+  // Initialize context
   MyContext* ctx = new (std::nothrow) MyContext();
-  if (!ctx) return ncclSystemError;
+  if (!ctx) return ncclInternalError;
   
   ctx->commId = commId;
   ctx->rank = rank;
   ctx->nranks = nranks;
   ctx->startTime = getTime();
-  ctx->gpuUuid[0] = '\0';  // Initialize to empty string
+  snprintf(ctx->gpuUuid, sizeof(ctx->gpuUuid), "%s", gpuUuidStr.c_str());
   
-  // Get GPU UUID from current CUDA device
-  int dev;
-  if (cudaGetDevice(&dev) == cudaSuccess) {
-    cudaDeviceProp deviceProp;
-    if (cudaGetDeviceProperties(&deviceProp, dev) == cudaSuccess) {
-      // Format UUID as standard string: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-      snprintf(ctx->gpuUuid, sizeof(ctx->gpuUuid),
-               "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-               deviceProp.uuid.bytes[0], deviceProp.uuid.bytes[1],
-               deviceProp.uuid.bytes[2], deviceProp.uuid.bytes[3],
-               deviceProp.uuid.bytes[4], deviceProp.uuid.bytes[5],
-               deviceProp.uuid.bytes[6], deviceProp.uuid.bytes[7],
-               deviceProp.uuid.bytes[8], deviceProp.uuid.bytes[9],
-               deviceProp.uuid.bytes[10], deviceProp.uuid.bytes[11],
-               deviceProp.uuid.bytes[12], deviceProp.uuid.bytes[13],
-               deviceProp.uuid.bytes[14], deviceProp.uuid.bytes[15]);
-    }
-  }
-  
-  // Initialize mutex for pool/blacklist access
-  if (pthread_mutex_init(&ctx->allocMutex, nullptr) != 0) {
+  if (pthread_mutex_init(&ctx->poolBlacklistMutex, nullptr) != 0) {
     delete ctx;
-    return ncclSystemError;
+    return ncclInternalError;
   }
-  
-  // Initialize event pool
   if (!ctx->pool.init(INITIAL_POOL_SIZE)) {
-    pthread_mutex_destroy(&ctx->allocMutex);
+    pthread_mutex_destroy(&ctx->poolBlacklistMutex);
     delete ctx;
-    return ncclSystemError;
+    return ncclInternalError;
   }
-  
-  fprintf(stdout, "[MinimalProfiler] Successfully initialized: tid=%d, rank=%d, commId=%lu, pool_size=%zu\n", 
-          tid, rank, commId, INITIAL_POOL_SIZE);
-  
-  // Register this context in the process-wide registry for PXN validation
-  registerContext(ctx);
+  registerContext(ctx);  // Register in the process-wide registry for PXN validation
   
   // Write ProfilerInit lifecycle event to JSONL
-  {
-    std::string detailsJson = "\"nranks\":" + std::to_string(nranks) +
-                              ",\"commName\":\"" + escapeJsonStringStd(commName ? commName : "") + "\"" +
-                              ",\"eventMask\":" + std::to_string(mask);
-    writeJsonlLifecycleEvent("ProfilerInit", ctx->startTime, ctx->gpuUuid, commId, rank, detailsJson);
-  }
+  std::string detailsJson = "\"nranks\":" + std::to_string(nranks) +
+                            ",\"commName\":\"" + escapeJsonStringStd(commName ? commName : "") + "\"" +
+                            ",\"eventMask\":" + std::to_string(mask);
+  writeJsonlLifecycleEvent("ProfilerInit", ctx->startTime, ctx->gpuUuid, commId, rank, detailsJson);
   
+  fprintf(stdout, "[MinimalProfiler] Successfully initialized: pid=%d, tid=%d, rank=%d, commId=%lu, pool_size=%zu\n", 
+    static_cast<int>(pid), tid, rank, commId, INITIAL_POOL_SIZE);
+
   *context = ctx;
   return ncclSuccess;
 }
@@ -1502,6 +1537,7 @@ ncclResult_t myInit(void** context, uint64_t commId, int* eActivationMask,
 // ----------------------------------------------------------------------------
 ncclResult_t myStartEvent(void* context, void** eHandle, 
                           ncclProfilerEventDescr_v5_t* eDescr) {
+  double startTime = getTime();
   MyContext* ctx = static_cast<MyContext*>(context);
   MyEvent* event = nullptr;
   
@@ -1514,132 +1550,92 @@ ncclResult_t myStartEvent(void* context, void** eHandle,
   // our address space.
   //
   // We detect this in two ways:
-  // 1. For ProxyOp events: check eDescr->proxyOp.pid against our profilerPid
+  // 1. For ProxyOp events: check eDescr->proxyOp.pid against getpid()
   // 2. For ALL events: check if context is in our registry of valid contexts
   //
-  // If the context is invalid, we treat the event as "detached" and use the
-  // process-wide detach pool instead.
+  // If the context is invalid, we use the process-wide pxn pool instead.
   // ========================================================================
   
-  // First, check the context registry to see if this is a valid context
-  // This catches ALL event types with invalid contexts (not just ProxyOp)
-  bool contextValid = isValidContext(context);
   
-  // For ProxyOp events, we can also check the pid field for more information
-  pid_t eventPid = 0;
+  bool isPxn;
   if (eDescr->type == ncclProfileProxyOp) {
-    eventPid = eDescr->proxyOp.pid;
-    // If pid doesn't match, context is definitely from another process
-    if (eventPid != profilerPid) {
-      contextValid = false;
-    }
+    isPxn = (eDescr->proxyOp.pid != getpid());
+  } else {
+    isPxn = !isValidContext(context);
   }
   
   // Allocate event from appropriate pool based on context validity
-  if (!contextValid) {
-    // Detached PXN event - ctx is invalid, use process-wide detach pool
+  if (isPxn) {
+    // PXN event - ctx is invalid, use process-wide pxn pool
     event = allocateFromPxnPool();
     if (!event) {
       *eHandle = nullptr;
       return ncclSuccess;  // Pool allocation failed - drop this event gracefully
     }
     
-    // Set up basic event fields for detached event
-    event->type = eDescr->type;
-    event->ctx = nullptr;  // ctx is invalid for PXN events - don't store it
-    event->startTime = getTime();
-    event->typeName = getEventTypeName(eDescr->type);
-    event->parentObj = eDescr->parentObj;
-    event->originPid = eventPid;  // Will be 0 for non-ProxyOp events
-    
-    // Initialize new fields for JSONL output (PXN events have no ctx access)
-    event->startTid = getTid();
-    event->startPid = getpid();
-    event->gpuUuid[0] = '\0';  // Not available for PXN
-    event->commId = 0;          // Not available for PXN
-    event->rank = -1;           // Not available for PXN
-    event->startDetails.clear(); // Will be populated in switch below
-    
-    // Track parentObj in detach blacklist to prevent address reuse
+    // Track parentObj in pxn blacklist to prevent address reuse. see caveats TODO
     trackPxnParent(eDescr->parentObj);
+
+    event->ctx = nullptr;        // ctx is invalid for PXN events - don't store it
+    event->gpuUuid[0] = '\0';    // Not available for PXN
+    event->commId = 0;           // Not available for PXN
+    event->rank = -1;            // Not available for PXN
   } else {
     // Normal event - context is valid, use per-context pool
-    pthread_mutex_lock(&ctx->allocMutex);
+    pthread_mutex_lock(&ctx->poolBlacklistMutex);
     event = ctx->pool.allocate(ctx->blacklist);
-    pthread_mutex_unlock(&ctx->allocMutex);
+    pthread_mutex_unlock(&ctx->poolBlacklistMutex);
     
     if (!event) {
       *eHandle = nullptr;
       return ncclSuccess;  // Fail gracefully
     }
     
-    // Set up basic event fields for normal event
-    event->type = eDescr->type;
-    event->ctx = ctx;
-    event->startTime = getTime();
-    event->typeName = getEventTypeName(eDescr->type);
-    event->parentObj = eDescr->parentObj;
-    event->fromDetachPool = false;
-    event->originPid = getpid();
-    
-    // Initialize new fields for JSONL output - capture ctx-dependent fields NOW
-    event->startTid = getTid();
-    event->startPid = getpid();
-    strncpy(event->gpuUuid, ctx->gpuUuid, sizeof(event->gpuUuid) - 1);
-    event->gpuUuid[sizeof(event->gpuUuid) - 1] = '\0';
-    event->commId = ctx->commId;
-    event->rank = ctx->rank;
-    event->startDetails.clear(); // Will be populated in switch below
-    
-    // Handle parent reference (add to blacklist) - only for local events
+    // track parent reference in per-context blacklist. see caveats TODO
     if (eDescr->parentObj) {
-      pthread_mutex_lock(&ctx->allocMutex);
+      pthread_mutex_lock(&ctx->poolBlacklistMutex);
       if (ctx->blacklist.contains(eDescr->parentObj)) {
         ctx->blacklist.incrementRef(eDescr->parentObj);
       } else {
         ctx->blacklist.add(eDescr->parentObj);
       }
-      pthread_mutex_unlock(&ctx->allocMutex);
+      pthread_mutex_unlock(&ctx->poolBlacklistMutex);
     }
+
+    event->ctx = ctx;
+    snprintf(event->gpuUuid, sizeof(event->gpuUuid), "%s", ctx->gpuUuid);
+    event->commId = ctx->commId;
+    event->rank = ctx->rank;
   }
   
-  // For coll and p2p events, push external correlation ID to CUPTI
-  // This links NCCL events to CUDA kernel activities, enabling post-processing
-  // tools to identify which kernels were launched during communication operations.
-  if ((eDescr->type == ncclProfileColl || eDescr->type == ncclProfileP2p) && 
-      checkCuptiAvailable() && !event->fromDetachPool) {
+  // correlate NCCL events with Kernels using CUPTI Activity API (only for non-PXN-events)
+  if ((eDescr->type == ncclProfileKernelLaunch) && !isPxn) {
     
-    // Generate a unique correlation ID for this NCCL event
-    event->externalCorrelationId = nextCorrelationId.fetch_add(1);
+    // PUSH a correlation ID for subsequent activities
+    uint64_t newCorrId = nextCorrelationId.fetch_add(1);
+    CUPTI_API_CALL(cuptiActivityPushExternalCorrelationId(
+      CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM2,
+      newCorrId
+    ));
+    
+    // Store the new correlation ID with this event for later matching
+    event->externalCorrelationId = newCorrId;
     event->hasExternalCorrelationId = true;
-    
-    // Push the correlation ID onto CUPTI's stack
-    // Any CUDA kernels launched while this ID is active will be tagged with it
-    CUptiResult cuptiErr = cuptiPushExternalCorrelationId(
-      CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM0,
-      event->externalCorrelationId
-    );
-    
-    if (cuptiErr != CUPTI_SUCCESS) {
-      // Failed to push - correlation tracking unavailable for this event
-      event->hasExternalCorrelationId = false;
-      event->externalCorrelationId = 0;
-    }
+
   } else {
-    // Not a coll/p2p event, CUPTI unavailable, or PXN event - no correlation ID
-    event->hasExternalCorrelationId = false;
     event->externalCorrelationId = 0;
+    event->hasExternalCorrelationId = false;
   }
   
-  // Build startDetails JSON for later JSONL output (stored in event, written on STOP)
-  // Uses std::string - no fixed buffer size limits
+  // set type specific details JSON
+  event->typeDetails.clear();
   switch (eDescr->type) {
     case ncclProfileGroupApi:
-      event->startDetails = "\"depth\":" + std::to_string(eDescr->groupApi.groupDepth) +
+      event->typeDetails = "\"depth\":" + std::to_string(eDescr->groupApi.groupDepth) +
                             ",\"graphCaptured\":" + (eDescr->groupApi.graphCaptured ? "true" : "false");
       break;
     case ncclProfileCollApi:
-      event->startDetails = "\"func\":\"" + escapeJsonStringStd(eDescr->collApi.func) + "\"" +
+      event->typeDetails = "\"func\":\"" + escapeJsonStringStd(eDescr->collApi.func) + "\"" +
                             ",\"count\":" + std::to_string(eDescr->collApi.count) +
                             ",\"dtype\":\"" + escapeJsonStringStd(eDescr->collApi.datatype) + "\"" +
                             ",\"root\":" + std::to_string(eDescr->collApi.root) +
@@ -1647,17 +1643,17 @@ ncclResult_t myStartEvent(void* context, void** eHandle,
                             ",\"graphCaptured\":" + (eDescr->collApi.graphCaptured ? "true" : "false");
       break;
     case ncclProfileP2pApi:
-      event->startDetails = "\"func\":\"" + escapeJsonStringStd(eDescr->p2pApi.func) + "\"" +
+      event->typeDetails = "\"func\":\"" + escapeJsonStringStd(eDescr->p2pApi.func) + "\"" +
                             ",\"count\":" + std::to_string(eDescr->p2pApi.count) +
                             ",\"dtype\":\"" + escapeJsonStringStd(eDescr->p2pApi.datatype) + "\"" +
                             ",\"stream\":\"" + formatPointerStd(eDescr->p2pApi.stream) + "\"" +
                             ",\"graphCaptured\":" + (eDescr->p2pApi.graphCaptured ? "true" : "false");
       break;
     case ncclProfileKernelLaunch:
-      event->startDetails = "\"stream\":\"" + formatPointerStd(eDescr->kernelLaunch.stream) + "\"";
+      event->typeDetails = "\"stream\":\"" + formatPointerStd(eDescr->kernelLaunch.stream) + "\"";
       break;
     case ncclProfileColl:
-      event->startDetails = "\"func\":\"" + escapeJsonStringStd(eDescr->coll.func) + "\"" +
+      event->typeDetails = "\"func\":\"" + escapeJsonStringStd(eDescr->coll.func) + "\"" +
                             ",\"seq\":" + std::to_string(eDescr->coll.seqNumber) +
                             ",\"algo\":\"" + escapeJsonStringStd(eDescr->coll.algo) + "\"" +
                             ",\"proto\":\"" + escapeJsonStringStd(eDescr->coll.proto) + "\"" +
@@ -1671,7 +1667,7 @@ ncclResult_t myStartEvent(void* context, void** eHandle,
                             ",\"parentGroup\":\"" + formatPointerStd(eDescr->coll.parentGroup) + "\"";
       break;
     case ncclProfileP2p:
-      event->startDetails = "\"func\":\"" + escapeJsonStringStd(eDescr->p2p.func) + "\"" +
+      event->typeDetails = "\"func\":\"" + escapeJsonStringStd(eDescr->p2p.func) + "\"" +
                             ",\"peer\":" + std::to_string(eDescr->p2p.peer) +
                             ",\"channels\":" + std::to_string(eDescr->p2p.nChannels) +
                             ",\"count\":" + std::to_string(eDescr->p2p.count) +
@@ -1680,7 +1676,7 @@ ncclResult_t myStartEvent(void* context, void** eHandle,
                             ",\"parentGroup\":\"" + formatPointerStd(eDescr->p2p.parentGroup) + "\"";
       break;
     case ncclProfileProxyOp:
-      event->startDetails = "\"channel\":" + std::to_string(eDescr->proxyOp.channelId) +
+      event->typeDetails = "\"channel\":" + std::to_string(eDescr->proxyOp.channelId) +
                             ",\"peer\":" + std::to_string(eDescr->proxyOp.peer) +
                             ",\"steps\":" + std::to_string(eDescr->proxyOp.nSteps) +
                             ",\"chunkSize\":" + std::to_string(eDescr->proxyOp.chunkSize) +
@@ -1688,17 +1684,17 @@ ncclResult_t myStartEvent(void* context, void** eHandle,
                             ",\"eventPid\":" + std::to_string(static_cast<int>(eDescr->proxyOp.pid));
       break;
     case ncclProfileProxyStep:
-      event->startDetails = "\"step\":" + std::to_string(eDescr->proxyStep.step);
+      event->typeDetails = "\"step\":" + std::to_string(eDescr->proxyStep.step);
       break;
     case ncclProfileProxyCtrl:
       // No extra details
       break;
     case ncclProfileKernelCh:
-      event->startDetails = "\"channel\":" + std::to_string(eDescr->kernelCh.channelId) +
+      event->typeDetails = "\"channel\":" + std::to_string(eDescr->kernelCh.channelId) +
                             ",\"pTimer\":" + std::to_string(eDescr->kernelCh.pTimer);
       break;
     case ncclProfileNetPlugin:
-      event->startDetails = "\"id\":" + std::to_string(static_cast<long>(eDescr->netPlugin.id)) +
+      event->typeDetails = "\"id\":" + std::to_string(static_cast<long>(eDescr->netPlugin.id)) +
                             ",\"data\":\"" + formatPointerStd(eDescr->netPlugin.data) + "\"";
       break;
     case ncclProfileGroup:
@@ -1708,11 +1704,21 @@ ncclResult_t myStartEvent(void* context, void** eHandle,
       {
         char buf[32];
         snprintf(buf, sizeof(buf), "0x%lx", static_cast<unsigned long>(eDescr->type));
-        event->startDetails = "\"rawType\":\"" + std::string(buf) + "\"";
+        event->typeDetails = "\"rawType\":\"" + std::string(buf) + "\"";
       }
       break;
   }
-  // Note: JSONL output is now written in myStopEvent as a complete event
+  
+  // Set basic fields
+  event->type = eDescr->type;
+  event->parentObj = eDescr->parentObj;
+  event->typeName = getEventTypeName(eDescr->type);
+  event->isPxn = isPxn;
+  event->startTime = startTime;
+  event->startTid = getTid();
+  event->startPid = getpid();
+
+  // Note: JSONL output is written in myStopEvent as a complete event with stopTime etc.
   
   *eHandle = event;
   return ncclSuccess;
@@ -1726,52 +1732,44 @@ ncclResult_t myStopEvent(void* eHandle) {
   
   MyEvent* event = static_cast<MyEvent*>(eHandle);
   MyContext* ctx = event->ctx;
-  double endTime = getTime();
-  double duration = (endTime - event->startTime);
-  pid_t tid = getTid();
   
-  // Handle detached PXN ProxyOp events from the detach pool
-  if (event->fromDetachPool) {
-    // Write JSONL event (PXN)
-    writeJsonlEventRecord(event, endTime, duration, tid);
-    
-    // Release parent reference and free to detach pool
+  writeJsonlEventRecord(event);
+
+  // CUPTI Activity API - pop id
+  if (event->hasExternalCorrelationId) {
+    uint64_t poppedCorrId = 0;
+    CUPTI_API_CALL(cuptiActivityPopExternalCorrelationId(
+      CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM2,
+      &poppedCorrId
+    ));
+  }
+
+  // Handle detached PXN events from the pxn pool
+  if (event->isPxn) {
+    // Release parent reference and free to pxn pool
     releasePxnParent(event->parentObj);
     freeToPxnPool(event);
     
     return ncclSuccess;
   }
   
-  // Normal event (from per-context pool) - ctx must be valid
+  // Handle normal event from per-context pool
   if (!ctx) {
     return ncclSuccess;  // Drop event if ctx is somehow NULL
   }
-  
-  // Write JSONL event (normal)
-  writeJsonlEventRecord(event, endTime, duration, tid);
-  
-  // Pop external correlation ID if we pushed one
-  // This removes the correlation ID from CUPTI's stack, ending the correlation period
-  if (event->hasExternalCorrelationId && cuptiAvailable && !event->fromDetachPool) {
-    cuptiPopExternalCorrelationId(CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM0, nullptr);
-  }
-  
-  // Decrement parent reference in blacklist
   if (event->parentObj) {
-    pthread_mutex_lock(&ctx->allocMutex);
+    pthread_mutex_lock(&ctx->poolBlacklistMutex);
     ctx->blacklist.decrementRef(event->parentObj);
-    pthread_mutex_unlock(&ctx->allocMutex);
+    pthread_mutex_unlock(&ctx->poolBlacklistMutex);
   }
-  
-  // Free the event
-  pthread_mutex_lock(&ctx->allocMutex);
+  pthread_mutex_lock(&ctx->poolBlacklistMutex);
   if (event->fromPool) {
     ctx->pool.free(event);
   } else {
     delete event;
   }
-  pthread_mutex_unlock(&ctx->allocMutex);
-  
+  pthread_mutex_unlock(&ctx->poolBlacklistMutex);
+
   return ncclSuccess;
 }
 
@@ -1783,61 +1781,32 @@ ncclResult_t myRecordEventState(void* eHandle,
                                  ncclProfilerEventStateArgs_v5_t* eStateArgs) {
   if (!eHandle) return ncclSuccess;
   
-  MyEvent* event = static_cast<MyEvent*>(eHandle);
-  MyContext* ctx = event->ctx;
+  // Write state to JSONL
   double currentTime = getTime();
   pid_t tid = getTid();
   pid_t pid = getpid();
   
-  const char* stateName = getStateName(eState);
-  
-  // Handle PXN events (ctx is nullptr)
-  if (event->fromDetachPool) {
-    // Write state to JSONL immediately
-    std::string details;
-    if (eStateArgs) {
-      switch (eState) {
-        case ncclProfilerProxyStepSendWait:
-        case ncclProfilerProxyStepRecvFlushWait:
+  std::string details;
+  if (eStateArgs) {
+    switch (eState) {
+      case ncclProfilerProxyStepSendWait:
+      case ncclProfilerProxyStepRecvFlushWait:
           details = "\"transSize\":" + std::to_string(eStateArgs->proxyStep.transSize);
-          break;
-        default:
-          break;
-      }
-    }
-    writeJsonlStateRecord(event, currentTime, stateName, static_cast<int>(eState), pid, tid, details);
-    return ncclSuccess;
-  }
-  
-  // Normal event - ctx must be valid
-  if (!ctx) {
-    return ncclSuccess;  // Drop event if ctx is NULL
-  }
-  
-  // Write state to JSONL immediately
-  {
-    std::string details;
-    if (eStateArgs) {
-      switch (eState) {
-        case ncclProfilerProxyStepSendWait:
-        case ncclProfilerProxyStepRecvFlushWait:
-          details = "\"transSize\":" + std::to_string(eStateArgs->proxyStep.transSize);
-          break;
-        case ncclProfilerProxyCtrlAppendEnd:
+        break;
+      case ncclProfilerProxyCtrlAppendEnd:
           details = "\"appendedProxyOps\":" + std::to_string(eStateArgs->proxyCtrl.appendedProxyOps);
-          break;
-        case ncclProfilerKernelChStop:
+        break;
+      case ncclProfilerKernelChStop:
           details = "\"pTimer\":" + std::to_string(eStateArgs->kernelCh.pTimer);
-          break;
-        case ncclProfilerNetPluginUpdate:
+        break;
+      case ncclProfilerNetPluginUpdate:
           details = "\"data\":\"" + formatPointerStd(eStateArgs->netPlugin.data) + "\"";
-          break;
-        default:
-          break;
-      }
+        break;
+      default:
+        break;
     }
-    writeJsonlStateRecord(event, currentTime, stateName, static_cast<int>(eState), pid, tid, details);
   }
+  writeJsonlStateRecord(static_cast<MyEvent*>(eHandle), currentTime, getStateName(eState), static_cast<int>(eState), pid, tid, details);
   
   return ncclSuccess;
 }
@@ -1848,48 +1817,36 @@ ncclResult_t myRecordEventState(void* eHandle,
 ncclResult_t myFinalize(void* context) {
   MyContext* ctx = static_cast<MyContext*>(context);
   pid_t tid = getTid();
-  double endTime = getTime();
-  double totalDuration = endTime - ctx->startTime;
+  double finalizeTime = getTime();
+  double totalDuration = finalizeTime - ctx->startTime;
   
-  // Write ProfilerFinalize lifecycle event to JSONL BEFORE unregistering/cleanup
-  {
-    char buf[64];
-    snprintf(buf, sizeof(buf), "%.3f", totalDuration);
-    std::string detailsJson = "\"totalDuration\":" + std::string(buf) +
-                              ",\"poolChunks\":" + std::to_string(ctx->pool.chunks.size()) +
-                              ",\"poolSlots\":" + std::to_string(ctx->pool.chunks.size() * ctx->pool.chunkSize) +
-                              ",\"blacklistSize\":" + std::to_string(ctx->blacklist.map.size());
-    writeJsonlLifecycleEvent("ProfilerFinalize", endTime, ctx->gpuUuid, ctx->commId, ctx->rank, detailsJson);
-  }
+  // Write ProfilerFinalize lifecycle event to JSONL
+  char buf[64];
+  snprintf(buf, sizeof(buf), "%.3f", totalDuration);
+  std::string detailsJson = "\"totalDuration\":" + std::string(buf) +
+                            ",\"poolChunks\":" + std::to_string(ctx->pool.chunks.size()) +
+                            ",\"poolSlots\":" + std::to_string(ctx->pool.chunks.size() * ctx->pool.chunkSize);
+  writeJsonlLifecycleEvent("ProfilerFinalize", finalizeTime, ctx->gpuUuid, ctx->commId, ctx->rank, detailsJson);
   
-  // Unregister this context from the process-wide registry
-  // Do this FIRST before any other cleanup to prevent race conditions
-  // where another thread might try to validate this context
-  unregisterContext(ctx);
-  
-  // Destroy mutex
-  pthread_mutex_destroy(&ctx->allocMutex);
-  
-  fprintf(stdout, "[MinimalProfiler] Finalized: tid=%d, rank=%d, commId=%lu, final_pool_chunks=%zu, final_pool_slots=%zu, final_blacklist_size=%zu\n", 
-          tid, ctx->rank, ctx->commId, ctx->pool.chunks.size(), 
-          ctx->pool.chunks.size() * ctx->pool.chunkSize, ctx->blacklist.map.size());
-  
+  // Clean up context
+  unregisterContext(ctx); // Unregister this context from the process-wide registry
+  pthread_mutex_destroy(&ctx->poolBlacklistMutex);  
   delete ctx;
   
-  // Clean up detach pool when last communicator is finalized
+  // Clean up process-wide resources when last communicator is finalized
   pthread_mutex_lock(&processStateMutex);
   activeContextCount--;
   if (activeContextCount == 0) {
     cleanupProcessResources();
-    fprintf(stdout, "[MinimalProfiler] Cleanup: detach pool and blacklist freed\n");
   }
   pthread_mutex_unlock(&processStateMutex);
   
+  fprintf(stdout, "[MinimalProfiler] Finalized: tid=%d\n", tid);
   return ncclSuccess;
 }
 
 // ============================================================================
-// SECTION 6: Export Struct
+// SECTION 9: Export Struct
 // ============================================================================
 ncclProfiler_v5_t ncclProfiler_v5 = {
   "MyMinimalProfiler",           // Plugin name

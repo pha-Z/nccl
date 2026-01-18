@@ -331,6 +331,12 @@
                     <!-- Buttons and checkboxes will be populated by JavaScript -->
                 </div>
             </div>
+            <div class="control-group">
+                <label>Filter by CUPTI Activity Type:</label>
+                <div id="cupti-type-filter-checkboxes" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                    <!-- Buttons and checkboxes will be populated by JavaScript -->
+                </div>
+            </div>
             <div class="control-group time-range-group">
                 <label>Time Range (μs):</label>
                 <div>
@@ -365,6 +371,10 @@
             <div class="control-group checkbox-option">
                 <input type="checkbox" id="normalize-time" checked>
                 <label for="normalize-time">Normalize Timeline (start at 0)</label>
+            </div>
+            <div class="control-group checkbox-option">
+                <input type="checkbox" id="show-correlation-connections" checked>
+                <label for="show-correlation-connections">Show Correlation Connections</label>
             </div>
         </div>
         
@@ -445,6 +455,37 @@
                         <strong>Red Connection Line:</strong> Connects collective events (CollApi, Coll) that belong together across ranks (based on seqNum and commId).
                     </div>
                 </div>
+                <div class="element-item">
+                    <div class="element-visual">
+                        <svg width="30" height="20" style="display: block;">
+                            <line x1="5" y1="5" x2="25" y2="15" stroke="#00d4ff" stroke-width="2" stroke-dasharray="5,3"/>
+                        </svg>
+                    </div>
+                    <div class="element-desc">
+                        <strong>Cyan Dotted Line:</strong> Connects NCCL events to their correlated CUPTI activities (based on extCorrId - external correlation ID from CUPTI).
+                    </div>
+                </div>
+            </div>
+            <div style="margin-top: 20px; padding: 15px; background: #1e1e1e; border-radius: 5px; border: 1px solid #333;">
+                <h4 style="color: #ffa500; margin-bottom: 10px;">CUPTI Activity Colors</h4>
+                <div style="display: flex; gap: 20px; flex-wrap: wrap; font-size: 12px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="width: 20px; height: 14px; background: #ffa500; border: 1px solid #555; border-radius: 2px; display: inline-block;"></span>
+                        <span>CUDA Kernels</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="width: 20px; height: 14px; background: #00ff7f; border: 1px solid #555; border-radius: 2px; display: inline-block;"></span>
+                        <span>Memory Copy (memcpy)</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="width: 20px; height: 14px; background: #ff69b4; border: 1px solid #555; border-radius: 2px; display: inline-block;"></span>
+                        <span>Memory Set (memset)</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="width: 20px; height: 14px; background: #9370db; border: 1px solid #555; border-radius: 2px; display: inline-block;"></span>
+                        <span>Other CUPTI Activities</span>
+                    </div>
+                </div>
             </div>
             <div style="margin-top: 20px; padding: 15px; background: #1e1e1e; border-radius: 5px; border: 1px solid #333;">
                 <h4 style="color: #4ec9b0; margin-bottom: 10px;">About ProfilerLifecycle Events</h4>
@@ -452,7 +493,7 @@
                     <p><strong>ProfilerLifecycle</strong> events represent the profiler plugin's tracking period for a communicator on a specific rank:</p>
                     <ul style="margin-left: 20px; margin-top: 8px;">
                         <li><strong>profilerInit:</strong> Called for each rank when the communicator is initialized on that rank (always corresponds to comm initialization on that rank)</li>
-                        <li><strong>profilerFinalize:</strong> Called for each rank when the profiler stops tracking the communicator on that rank. This typically means the communicator is finalized/destroyed, but it may also be called when the communicator is only revoked (not fully destroyed/freed).</li>
+                        <li><strong>profilerFinalize:</strong> Called for each rank when the profiler stops tracking the communicator on that rank. Always called during communicator destruction (`ncclCommDestroy`). For revoked communicators, it is called later when any communicator in the same intra-process group is destroyed.</li>
                     </ul>
                     <p style="margin-top: 8px;">The bar spans from plugin initialization to finalization, showing the period during which the profiler was actively tracking this communicator on this rank.</p>
                 </div>
@@ -480,6 +521,10 @@
             'KernelCh': '#569cd6',
             'NetPlugin': '#569cd6',
             'Group': '#4ec9b0',
+            'CuptiKernel': '#ffa500',    // Orange for CUDA kernels
+            'CuptiMemcpy': '#00ff7f',     // Green for memcpy
+            'CuptiMemset': '#ff69b4',     // Pink for memset
+            'CuptiOther': '#9370db',      // Purple for other CUPTI activities
             'Unknown': '#858585'
         };
         
@@ -505,6 +550,8 @@
         let showParentArrows = true;
         let showCollectiveLines = true;
         let showProfilerLifecycleLines = true;
+        // CUPTI activities are now controlled by type filter checkboxes only
+        let showCorrelationConnections = true; // Default to showing correlation connections
         let groupByType = true; // Default to new mode (group by rank+type)
         let normalizeTime = true; // Default to normalized timeline (start at 0)
         let isSelecting = false;
@@ -557,6 +604,22 @@
             return normalized;
         }
         
+        // Helper function to get normalized CUPTI activity (creates a copy with normalized timestamps)
+        function getNormalizedActivity(activity) {
+            if (!normalizeTime || !eventsData || eventsData.global_min_time === undefined) {
+                return activity;
+            }
+            
+            const normalized = { ...activity };
+            if (normalized.start !== null && normalized.start !== undefined) {
+                normalized.start = normalizeTimestamp(normalized.start);
+            }
+            if (normalized.stop !== null && normalized.stop !== undefined) {
+                normalized.stop = normalizeTimestamp(normalized.stop);
+            }
+            return normalized;
+        }
+        
         // Convert JSONL event to old format (for compatibility with existing visualization code)
         function convertJsonlEvent(jsonlEvent) {
             // Simplify type name (ncclProfileColl -> Coll)
@@ -587,6 +650,8 @@
                 myPid: jsonlEvent.myPid || null,
                 originPid: jsonlEvent.originPid || null,
                 isPxn: jsonlEvent.isPxn || false,
+                extCorrId: jsonlEvent.extCorrId || null,
+                corrId: jsonlEvent.corrId || null,
                 details: jsonlEvent.details || {},
                 states: []
             };
@@ -627,6 +692,43 @@
             }
             
             return event;
+        }
+        
+        // Convert CUPTI activity record to visualization format
+        function convertCuptiActivity(cuptiRecord) {
+            const type = cuptiRecord.type || 'OTHER';
+            let visualType = 'CuptiOther';
+            if (type === 'KERNEL') {
+                visualType = 'CuptiKernel';
+            } else if (type === 'MEMCPY') {
+                visualType = 'CuptiMemcpy';
+            } else if (type === 'MEMSET') {
+                visualType = 'CuptiMemset';
+            }
+            
+            const activity = {
+                type: visualType,
+                type_name: type,
+                isCuptiActivity: true,
+                extCorrId: cuptiRecord.extCorrId || null,
+                corrId: cuptiRecord.corrId || null,
+                deviceId: cuptiRecord.deviceId !== undefined ? cuptiRecord.deviceId : null,
+                gpuUuid: cuptiRecord.gpuUuid || null,
+                start: cuptiRecord.start?.ts ?? null,
+                stop: cuptiRecord.stop?.ts ?? null,
+                start_tid: cuptiRecord.start?.tid ?? null,
+                stop_tid: cuptiRecord.stop?.tid ?? null,
+                start_pid: cuptiRecord.start?.pid ?? null,
+                stop_pid: cuptiRecord.stop?.pid ?? null,
+                duration: cuptiRecord.duration || null,
+                myPid: cuptiRecord.myPid || null,
+                name: cuptiRecord.name || null,
+                stream: cuptiRecord.stream || null,
+                size: cuptiRecord.size || null,
+                details: cuptiRecord.details || {}
+            };
+            
+            return activity;
         }
         
         // Generate unique ID for an event (similar to Python parser)
@@ -700,9 +802,10 @@
                 const lines = jsonlText.trim().split('\n').filter(line => line.trim());
                 
                 // Two-pass parsing:
-                // Pass 1: Collect event records and state records separately
+                // Pass 1: Collect event records, state records, and CUPTI activity records separately
                 const eventRecords = [];  // {recordType: "event", ...}
                 const stateRecords = [];  // {recordType: "state", eventAddr: "0x...", ...}
+                const cuptiActivityRecords = [];  // {recordType: "cuptiActivity", ...}
                 
                 let errorCount = 0;
                 let nonJsonCount = 0;
@@ -725,6 +828,8 @@
                         const record = JSON.parse(trimmedLine);
                         if (record.recordType === 'state') {
                             stateRecords.push(record);
+                        } else if (record.recordType === 'cuptiActivity') {
+                            cuptiActivityRecords.push({record, index});
                         } else if (record.recordType === 'event' || record.type) {
                             // Event record (recordType:"event" or has type field)
                             eventRecords.push({record, index});
@@ -744,7 +849,7 @@
                     console.error(`Non-JSON lines (not starting with '{'): ${nonJsonCount}`);
                     console.error(`JSON parse errors: ${parseErrorCount}`);
                     console.error(`Total errors: ${nonJsonCount + parseErrorCount}`);
-                    console.error(`Successfully parsed: ${eventRecords.length} events, ${stateRecords.length} states`);
+                    console.error(`Successfully parsed: ${eventRecords.length} events, ${stateRecords.length} states, ${cuptiActivityRecords.length} CUPTI activities`);
                 }
                 
                 // Group states by eventAddr for fast lookup
@@ -758,14 +863,20 @@
                     }
                 });
                 
-                // Pass 2: Convert events and attach states
+                // Pass 2: Convert events and CUPTI activities, attach states
                 const events = {};
+                const cuptiActivities = {};
                 const ranks = new Set();
                 const contexts = new Set();
                 const threads = new Set();
                 const pids = new Set();
                 const commids = new Set();
                 const gpuUuids = new Set();
+                const deviceIds = new Set();
+                
+                // Correlation maps: extCorrId -> arrays of event/activity keys
+                const extCorrIdToNcclEvents = new Map();
+                const extCorrIdToCuptiActivities = new Map();
                 
                 // Statistics for state attachment
                 let eventsWithStates = 0;
@@ -850,9 +961,52 @@
                         if (state.tid !== null) threads.add(state.tid);
                         if (state.pid !== null) pids.add(state.pid);
                     });
+                    
+                    // Track extCorrId for correlation mapping (with PID for process-specific matching)
+                    if (event.extCorrId !== undefined && event.extCorrId !== null) {
+                        // Use composite key: extCorrId + pid (use start_pid, fallback to stop_pid)
+                        const pid = event.start_pid !== null && event.start_pid !== undefined 
+                            ? event.start_pid 
+                            : (event.stop_pid !== null && event.stop_pid !== undefined ? event.stop_pid : null);
+                        const correlationKey = pid !== null ? `${event.extCorrId}_${pid}` : String(event.extCorrId);
+                        if (!extCorrIdToNcclEvents.has(correlationKey)) {
+                            extCorrIdToNcclEvents.set(correlationKey, []);
+                        }
+                        extCorrIdToNcclEvents.get(correlationKey).push(eventId);
+                    }
                 });
                 
-                console.log(`Loaded ${eventRecords.length} events and ${stateRecords.length} state records`);
+                // Process CUPTI activities
+                cuptiActivityRecords.forEach(({record, index}) => {
+                    const activity = convertCuptiActivity(record);
+                    // Generate unique ID for CUPTI activity
+                    const activityId = `cupti_${activity.deviceId}_${activity.type_name}_${activity.start || index}_${index}`;
+                    
+                    cuptiActivities[activityId] = activity;
+                    
+                    // Collect metadata
+                    if (activity.deviceId !== null) deviceIds.add(activity.deviceId);
+                    if (activity.gpuUuid) gpuUuids.add(activity.gpuUuid);
+                    if (activity.start_tid !== null) threads.add(activity.start_tid);
+                    if (activity.stop_tid !== null) threads.add(activity.stop_tid);
+                    if (activity.start_pid !== null) pids.add(activity.start_pid);
+                    if (activity.stop_pid !== null) pids.add(activity.stop_pid);
+                    
+                    // Track extCorrId for correlation mapping (with PID for process-specific matching)
+                    if (activity.extCorrId !== undefined && activity.extCorrId !== null) {
+                        // Use composite key: extCorrId + pid (use start_pid, fallback to stop_pid)
+                        const pid = activity.start_pid !== null && activity.start_pid !== undefined 
+                            ? activity.start_pid 
+                            : (activity.stop_pid !== null && activity.stop_pid !== undefined ? activity.stop_pid : null);
+                        const correlationKey = pid !== null ? `${activity.extCorrId}_${pid}` : String(activity.extCorrId);
+                        if (!extCorrIdToCuptiActivities.has(correlationKey)) {
+                            extCorrIdToCuptiActivities.set(correlationKey, []);
+                        }
+                        extCorrIdToCuptiActivities.get(correlationKey).push(activityId);
+                    }
+                });
+                
+                console.log(`Loaded ${eventRecords.length} events, ${stateRecords.length} state records, and ${cuptiActivityRecords.length} CUPTI activities`);
                 console.log(`State attachment: ${eventsWithStates} events have states (${totalStatesAttached} total states attached)`);
                 
                 // Check for orphan states (states without eventAddr) and unmatched states
@@ -919,15 +1073,20 @@
                 // Build eventsData structure
                 eventsData = {
                     events: events,
+                    cuptiActivities: cuptiActivities,
                     ranks: Array.from(ranks).sort((a, b) => a - b),
                     contexts: Array.from(contexts).sort(),
                     threads: Array.from(threads).sort((a, b) => a - b),
                     pids: Array.from(pids).sort((a, b) => a - b),
                     commids: Array.from(commids).sort(),
-                    gpuUuids: Array.from(gpuUuids).sort(), // New: GPU UUIDs
+                    gpuUuids: Array.from(gpuUuids).sort(),
+                    deviceIds: Array.from(deviceIds).sort((a, b) => a - b),
+                    extCorrIdToNcclEvents: extCorrIdToNcclEvents,
+                    extCorrIdToCuptiActivities: extCorrIdToCuptiActivities,
                     parent_child_map: parent_child_map,
                     event_to_parent: event_to_parent,
-                    total_events: Object.keys(events).length
+                    total_events: Object.keys(events).length,
+                    total_cupti_activities: Object.keys(cuptiActivities).length
                 };
                 
                 // Calculate global_min_time from events
@@ -942,7 +1101,7 @@
             }
         }
         
-        // Calculate global minimum timestamp from all events
+        // Calculate global minimum timestamp from all events and CUPTI activities
         // This makes the visualizer self-contained - it doesn't need parse_logs.py to pre-calculate this
         function calculateGlobalMinTime() {
             let minTimestamp = Infinity;
@@ -960,6 +1119,16 @@
                             minTimestamp = Math.min(minTimestamp, state.timestamp);
                         }
                     });
+                }
+            }
+            
+            // Include CUPTI activities in time calculation
+            for (const [key, activity] of Object.entries(eventsData.cuptiActivities || {})) {
+                if (activity.start !== null && activity.start !== undefined) {
+                    minTimestamp = Math.min(minTimestamp, activity.start);
+                }
+                if (activity.stop !== null && activity.stop !== undefined) {
+                    minTimestamp = Math.min(minTimestamp, activity.stop);
                 }
             }
             
@@ -1067,6 +1236,27 @@
                 });
             }
             
+            // Populate Device ID filter (for CUPTI activities)
+            const deviceFilter = document.getElementById('device-filter');
+            if (!deviceFilter) {
+                // Create device filter if it doesn't exist
+                const controls = document.querySelector('.controls');
+                const deviceFilterGroup = document.createElement('div');
+                deviceFilterGroup.className = 'control-group';
+                deviceFilterGroup.innerHTML = '<label>Filter by GPU Device ID:</label><select id="device-filter"><option value="all">All Devices</option></select>';
+                controls.appendChild(deviceFilterGroup);
+            }
+            const deviceFilterSelect = document.getElementById('device-filter');
+            const deviceIds = eventsData.deviceIds || [];
+            if (deviceIds.length > 0) {
+                deviceIds.forEach(deviceId => {
+                    const option = document.createElement('option');
+                    option.value = deviceId;
+                    option.textContent = `Device ${deviceId}`;
+                    deviceFilterSelect.appendChild(option);
+                });
+            }
+            
             // Populate communicator filter
             const commidFilter = document.getElementById('commid-filter');
             // If commids array is empty, try to extract from events
@@ -1164,6 +1354,84 @@
                 typeFilterContainer.appendChild(checkboxItem);
             });
             
+            // Populate CUPTI activity type filter with checkboxes
+            const cuptiTypeFilterContainer = document.getElementById('cupti-type-filter-checkboxes');
+            if (cuptiTypeFilterContainer) {
+                const cuptiTypes = new Set();
+                if (eventsData.cuptiActivities) {
+                    Object.values(eventsData.cuptiActivities).forEach(activity => {
+                        if (activity.type) cuptiTypes.add(activity.type);
+                    });
+                }
+                
+                // Add "Select All" / "Deselect All" buttons
+                const cuptiSelectAllBtn = document.createElement('button');
+                cuptiSelectAllBtn.textContent = 'All';
+                cuptiSelectAllBtn.className = 'type-filter-btn';
+                cuptiSelectAllBtn.onclick = () => {
+                    Array.from(cuptiTypeFilterContainer.querySelectorAll('input[type="checkbox"]')).forEach(cb => cb.checked = true);
+                    applyFilters();
+                };
+                cuptiTypeFilterContainer.appendChild(cuptiSelectAllBtn);
+                
+                const cuptiDeselectAllBtn = document.createElement('button');
+                cuptiDeselectAllBtn.textContent = 'None';
+                cuptiDeselectAllBtn.className = 'type-filter-btn';
+                cuptiDeselectAllBtn.onclick = () => {
+                    Array.from(cuptiTypeFilterContainer.querySelectorAll('input[type="checkbox"]')).forEach(cb => cb.checked = false);
+                    applyFilters();
+                };
+                cuptiTypeFilterContainer.appendChild(cuptiDeselectAllBtn);
+                
+                // Add checkboxes for each CUPTI activity type
+                // Define the order: KERNEL, MEMCPY, MEMSET, OTHER
+                const cuptiTypeOrder = ['CuptiKernel', 'CuptiMemcpy', 'CuptiMemset', 'CuptiOther'];
+                const sortedCuptiTypes = Array.from(cuptiTypes).sort((a, b) => {
+                    const aIndex = cuptiTypeOrder.indexOf(a);
+                    const bIndex = cuptiTypeOrder.indexOf(b);
+                    if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
+                    if (aIndex !== -1) return -1;
+                    if (bIndex !== -1) return 1;
+                    return a.localeCompare(b);
+                });
+                
+                sortedCuptiTypes.forEach(type => {
+                    const checkboxItem = document.createElement('div');
+                    checkboxItem.className = 'type-checkbox-item';
+                    
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.id = `cupti-type-filter-${type}`;
+                    checkbox.value = type;
+                    checkbox.checked = true; // All checked by default
+                    checkbox.addEventListener('change', applyFilters);
+                    
+                    const label = document.createElement('label');
+                    label.htmlFor = `cupti-type-filter-${type}`;
+                    // Display user-friendly name
+                    const displayName = type.replace('Cupti', '');
+                    label.textContent = displayName;
+                    
+                    // Add color indicator
+                    const colorBox = document.createElement('span');
+                    colorBox.style.cssText = `width: 12px; height: 12px; background: ${EVENT_COLORS[type] || EVENT_COLORS['Unknown']}; border: 1px solid #555; border-radius: 2px; display: inline-block;`;
+                    
+                    checkboxItem.appendChild(checkbox);
+                    checkboxItem.appendChild(colorBox);
+                    checkboxItem.appendChild(label);
+                    
+                    // Make the entire box clickable
+                    checkboxItem.addEventListener('click', (e) => {
+                        if (e.target !== checkbox && e.target !== label) {
+                            checkbox.checked = !checkbox.checked;
+                            applyFilters();
+                        }
+                    });
+                    
+                    cuptiTypeFilterContainer.appendChild(checkboxItem);
+                });
+            }
+            
             // Setup event listeners
             rankFilter.addEventListener('change', applyFilters);
             contextFilter.addEventListener('change', applyFilters);
@@ -1234,6 +1502,14 @@
                 
                 applyFilters();
             });
+            document.getElementById('show-correlation-connections').addEventListener('change', (e) => {
+                showCorrelationConnections = e.target.checked;
+                renderTimeline();
+            });
+            // deviceFilterSelect was already declared earlier in initializeFilters() - just add event listener
+            if (deviceFilterSelect) {
+                deviceFilterSelect.addEventListener('change', applyFilters);
+            }
         }
         
         function applyFilters() {
@@ -1243,6 +1519,7 @@
             const pidFilter = document.getElementById('pid-filter').value;
             const commidFilter = document.getElementById('commid-filter').value;
             const gpuFilter = document.getElementById('gpu-filter').value;
+            const deviceFilter = document.getElementById('device-filter') ? document.getElementById('device-filter').value : 'all';
             let timeMin = parseFloat(document.getElementById('time-min').value) || null;
             let timeMax = parseFloat(document.getElementById('time-max').value) || null;
             
@@ -1259,11 +1536,21 @@
             
             // Get selected event types from checkboxes
             const selectedTypes = new Set();
-            document.querySelectorAll('#type-filter-checkboxes input[type="checkbox"]:checked').forEach(checkbox => {
+            const typeFilterContainer = document.getElementById('type-filter-checkboxes');
+            const hasTypeFilter = typeFilterContainer && typeFilterContainer.querySelectorAll('input[type="checkbox"]').length > 0;
+            typeFilterContainer?.querySelectorAll('input[type="checkbox"]:checked').forEach(checkbox => {
                 selectedTypes.add(checkbox.value);
             });
             
-            // Filter events using absolute timestamps
+            // Get selected CUPTI activity types from checkboxes
+            const selectedCuptiTypes = new Set();
+            const cuptiTypeFilterContainer = document.getElementById('cupti-type-filter-checkboxes');
+            const hasCuptiTypeFilter = cuptiTypeFilterContainer && cuptiTypeFilterContainer.querySelectorAll('input[type="checkbox"]').length > 0;
+            cuptiTypeFilterContainer?.querySelectorAll('input[type="checkbox"]:checked').forEach(checkbox => {
+                selectedCuptiTypes.add(checkbox.value);
+            });
+            
+            // Filter NCCL events using absolute timestamps
             filteredEvents = Object.entries(eventsData.events).filter(([key, event]) => {
                 if (rankFilter !== 'all' && event.rank !== parseInt(rankFilter)) return false;
                 if (contextFilter !== 'all' && event.ctx !== contextFilter) return false;
@@ -1294,7 +1581,10 @@
                 // GPU UUID filter
                 if (gpuFilter !== 'all' && event.gpuUuid !== gpuFilter) return false;
                 
-                if (selectedTypes.size > 0 && !selectedTypes.has(event.type)) return false;
+                // Type filter: if filter exists and nothing is selected, hide all; if something is selected, show only selected
+                if (hasTypeFilter) {
+                    if (selectedTypes.size === 0 || !selectedTypes.has(event.type)) return false;
+                }
                 
                 // Time filtering: compare against absolute timestamps
                 if (timeMin !== null && event.stop !== null && event.stop < timeMin) return false;
@@ -1304,6 +1594,48 @@
                 // Return normalized event for display
                 return [key, getNormalizedEvent(event)];
             });
+            
+            // Filter and add CUPTI activities (controlled by type filter checkboxes)
+            if (eventsData.cuptiActivities) {
+                const filteredActivities = Object.entries(eventsData.cuptiActivities).filter(([key, activity]) => {
+                    // Type filter for CUPTI activities: if filter exists and nothing is selected, hide all; if something is selected, show only selected
+                    if (hasCuptiTypeFilter) {
+                        if (selectedCuptiTypes.size === 0 || !selectedCuptiTypes.has(activity.type)) return false;
+                    }
+                    
+                    // Device filter
+                    if (deviceFilter !== 'all' && activity.deviceId !== parseInt(deviceFilter)) return false;
+                    
+                    // Thread filter for CUPTI activities
+                    if (threadFilter !== 'all') {
+                        const tid = parseInt(threadFilter);
+                        const hasMatchingTid = 
+                            activity.start_tid === tid || 
+                            activity.stop_tid === tid;
+                        if (!hasMatchingTid) return false;
+                    }
+                    
+                    // Process ID filter for CUPTI activities
+                    if (pidFilter !== 'all') {
+                        const pid = parseInt(pidFilter);
+                        const hasMatchingPid = 
+                            activity.start_pid === pid || 
+                            activity.stop_pid === pid;
+                        if (!hasMatchingPid) return false;
+                    }
+                    
+                    // Time filtering: compare against absolute timestamps
+                    if (timeMin !== null && activity.stop !== null && activity.stop < timeMin) return false;
+                    if (timeMax !== null && activity.start !== null && activity.start > timeMax) return false;
+                    return true;
+                }).map(([key, activity]) => {
+                    // Return normalized activity for display
+                    return [key, getNormalizedActivity(activity)];
+                });
+                
+                // Append CUPTI activities to filteredEvents
+                filteredEvents = filteredEvents.concat(filteredActivities);
+            }
             
             renderTimeline();
         }
@@ -1321,10 +1653,13 @@
                     minTime = Math.min(minTime, event.stop);
                     maxTime = Math.max(maxTime, event.stop);
                 }
-                event.states.forEach(state => {
-                    minTime = Math.min(minTime, state.timestamp);
-                    maxTime = Math.max(maxTime, state.timestamp);
-                });
+                // CUPTI activities don't have states, so check before iterating
+                if (event.states && event.states.length > 0) {
+                    event.states.forEach(state => {
+                        minTime = Math.min(minTime, state.timestamp);
+                        maxTime = Math.max(maxTime, state.timestamp);
+                    });
+                }
             });
             
             if (minTime === Infinity) {
@@ -1340,12 +1675,13 @@
         
         // Helper function to get event time bounds (already normalized if normalizeTime is true)
         function getEventBounds(event) {
+            const hasStates = event.states && event.states.length > 0;
             const eventStart = event.start !== null ? event.start : 
                 (event.stop !== null ? event.stop - 1000 : 
-                (event.states.length > 0 ? event.states[0].timestamp - 1000 : 0));
+                (hasStates ? event.states[0].timestamp - 1000 : 0));
             const eventEnd = event.stop !== null ? event.stop : 
                 (event.start !== null ? event.start + 1000 : 
-                (event.states.length > 0 ? event.states[event.states.length - 1].timestamp + 1000 : eventStart + 1000));
+                (hasStates ? event.states[event.states.length - 1].timestamp + 1000 : eventStart + 1000));
             return { start: eventStart, end: eventEnd };
         }
         
@@ -1384,12 +1720,25 @@
             // Concurrent events (overlapping) go on different lanes
             // When a new event comes after concurrent events, prefer the first lane of that type
             // Lanes are ordered by communicator first, then rank, then by preferred event type order
+            // CUPTI activities are grouped by device ID and type
             const lanes = [];
             const eventToLane = new Map();
+            const activityToLane = new Map();
             
-            // Group events by communicator, rank and type
+            // Separate NCCL events and CUPTI activities
+            const ncclEvents = [];
+            const cuptiActivities = [];
+            filteredEvents.forEach(([key, item]) => {
+                if (item.isCuptiActivity) {
+                    cuptiActivities.push([key, item]);
+                } else {
+                    ncclEvents.push([key, item]);
+                }
+            });
+            
+            // Group NCCL events by communicator, rank and type
             const groups = new Map();
-            filteredEvents.forEach(([key, event]) => {
+            ncclEvents.forEach(([key, event]) => {
                 const eventType = event.type || 'Unknown';
                 const commid = event.commid || 'unknown';
                 const groupKey = `comm${commid}_rank${event.rank}_type${eventType}`;
@@ -1399,9 +1748,24 @@
                 groups.get(groupKey).push([key, event]);
             });
             
+            // Group CUPTI activities by device ID and type
+            const cuptiGroups = new Map();
+            cuptiActivities.forEach(([key, activity]) => {
+                const activityType = activity.type || 'CuptiOther';
+                const deviceId = activity.deviceId !== null ? activity.deviceId : 'unknown';
+                const groupKey = `cupti_device${deviceId}_type${activityType}`;
+                if (!cuptiGroups.has(groupKey)) {
+                    cuptiGroups.set(groupKey, []);
+                }
+                cuptiGroups.get(groupKey).push([key, activity]);
+            });
+            
             // Track which lanes belong to which comm+rank+type combination
             // Map: groupKey -> array of lane indices for that group
             const groupLanes = new Map();
+            
+            // Track which lanes belong to which CUPTI device+type combination
+            const cuptiGroupLanes = new Map();
             
             // Process each group separately
             Array.from(groups.entries()).sort((a, b) => {
@@ -1490,7 +1854,66 @@
                 });
             });
             
-            return { lanes, eventToLane };
+            // Process CUPTI activity groups into lanes (similar to NCCL events)
+            Array.from(cuptiGroups.entries()).sort((a, b) => {
+                // Sort by device ID first, then by activity type
+                const deviceIdA = a[1][0][1].deviceId !== null ? a[1][0][1].deviceId : -1;
+                const deviceIdB = b[1][0][1].deviceId !== null ? b[1][0][1].deviceId : -1;
+                if (deviceIdA !== deviceIdB) return deviceIdA - deviceIdB;
+                
+                const typeA = a[1][0][1].type || 'CuptiOther';
+                const typeB = b[1][0][1].type || 'CuptiOther';
+                return typeA.localeCompare(typeB);
+            }).forEach(([groupKey, groupActivities]) => {
+                // Initialize lane tracking for this CUPTI group
+                if (!cuptiGroupLanes.has(groupKey)) {
+                    cuptiGroupLanes.set(groupKey, []);
+                }
+                const groupLaneIndices = cuptiGroupLanes.get(groupKey);
+                
+                // Sort activities in this group by start time
+                const sortedActivities = groupActivities.sort((a, b) => {
+                    const boundsA = getEventBounds(a[1]);
+                    const boundsB = getEventBounds(b[1]);
+                    return boundsA.start - boundsB.start;
+                });
+                
+                // Assign lanes within this group
+                sortedActivities.forEach(([key, activity]) => {
+                    const activityBounds = getEventBounds(activity);
+                    
+                    let assignedLane = -1;
+                    
+                    if (groupByType) {
+                        // Mode: Allow multiple non-overlapping activities of same type on same lane
+                        for (const laneIndex of groupLaneIndices) {
+                            const laneEvents = lanes[laneIndex];
+                            
+                            // Check if this activity overlaps with any event in this lane
+                            const hasOverlap = laneEvents.some(([otherKey, otherEvent]) => {
+                                return eventsOverlap(activity, otherEvent);
+                            });
+                            
+                            if (!hasOverlap) {
+                                assignedLane = laneIndex;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // If no existing lane works, create a new one
+                    if (assignedLane === -1) {
+                        assignedLane = lanes.length;
+                        lanes.push([]);
+                        groupLaneIndices.push(assignedLane);
+                    }
+                    
+                    lanes[assignedLane].push([key, activity]);
+                    activityToLane.set(key, assignedLane);
+                });
+            });
+            
+            return { lanes, eventToLane, activityToLane };
         }
         
         function organizeLanesByCommContext() {
@@ -1567,7 +1990,12 @@
             // Always use comm+rank+type grouping with preferred type order
             // The toggle controls whether we allow multiple non-overlapping events per lane
             // (groupByType=true) or force one event per lane (groupByType=false)
-            return organizeLanesByType();
+            const result = organizeLanesByType();
+            // Ensure activityToLane exists
+            if (!result.activityToLane) {
+                result.activityToLane = new Map();
+            }
+            return result;
         }
         
         function timeToX(time) {
@@ -1780,6 +2208,85 @@
             ctx.restore();
         }
         
+        function drawCorrelationConnections(renderedEventsMap, renderedActivitiesMap, eventToLane, activityToLane) {
+            if (!eventsData.extCorrIdToNcclEvents || !eventsData.extCorrIdToCuptiActivities) return;
+            
+            ctx.save();
+            ctx.globalAlpha = 0.7;
+            ctx.strokeStyle = '#00d4ff'; // Cyan for correlation connections
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 3]); // Dotted line to distinguish from other connections
+            
+            // Iterate through all correlation keys (extCorrId_pid or extCorrId)
+            const allCorrelationKeys = new Set([
+                ...Array.from(eventsData.extCorrIdToNcclEvents.keys()),
+                ...Array.from(eventsData.extCorrIdToCuptiActivities.keys())
+            ]);
+            
+            for (const correlationKey of allCorrelationKeys) {
+                const ncclEventKeys = eventsData.extCorrIdToNcclEvents.get(correlationKey) || [];
+                const cuptiActivityKeys = eventsData.extCorrIdToCuptiActivities.get(correlationKey) || [];
+                
+                // Draw connections from each NCCL event to each correlated CUPTI activity
+                ncclEventKeys.forEach(ncclKey => {
+                    const ncclEvent = renderedEventsMap.get(ncclKey);
+                    if (!ncclEvent || !ncclEvent._bounds) return;
+                    
+                    const ncclLane = eventToLane.get(ncclKey);
+                    if (ncclLane === undefined) return;
+                    
+                    const ncclY = 40 + ncclLane * laneHeight + laneHeight / 2;
+                    const ncclX = ncclEvent._bounds.startX !== undefined && ncclEvent._bounds.endX !== undefined
+                        ? (ncclEvent._bounds.startX + ncclEvent._bounds.endX) / 2
+                        : (ncclEvent._bounds.startX || ncclEvent._bounds.endX || 0);
+                    
+                    cuptiActivityKeys.forEach(cuptiKey => {
+                        const cuptiActivity = renderedActivitiesMap.get(cuptiKey);
+                        if (!cuptiActivity || !cuptiActivity._bounds) return;
+                        
+                        const cuptiLane = activityToLane.get(cuptiKey);
+                        if (cuptiLane === undefined) return;
+                        
+                        const cuptiY = 40 + cuptiLane * laneHeight + laneHeight / 2;
+                        const cuptiX = cuptiActivity._bounds.startX !== undefined && cuptiActivity._bounds.endX !== undefined
+                            ? (cuptiActivity._bounds.startX + cuptiActivity._bounds.endX) / 2
+                            : (cuptiActivity._bounds.startX || cuptiActivity._bounds.endX || 0);
+                        
+                        // Draw Bezier curve from NCCL event to CUPTI activity
+                        const midX = (ncclX + cuptiX) / 2;
+                        const controlY1 = ncclY + (cuptiY > ncclY ? 30 : -30);
+                        const controlY2 = cuptiY + (cuptiY > ncclY ? -30 : 30);
+                        
+                        ctx.beginPath();
+                        ctx.moveTo(ncclX, ncclY);
+                        ctx.bezierCurveTo(midX, controlY1, midX, controlY2, cuptiX, cuptiY);
+                        ctx.stroke();
+                        
+                        // Draw arrowhead at CUPTI activity end
+                        const angle = Math.atan2(cuptiY - controlY2, cuptiX - midX);
+                        const arrowLength = 10;
+                        const arrowWidth = 5;
+                        
+                        ctx.beginPath();
+                        ctx.moveTo(cuptiX, cuptiY);
+                        ctx.lineTo(
+                            cuptiX - arrowLength * Math.cos(angle - Math.PI / 6),
+                            cuptiY - arrowLength * Math.sin(angle - Math.PI / 6)
+                        );
+                        ctx.moveTo(cuptiX, cuptiY);
+                        ctx.lineTo(
+                            cuptiX - arrowLength * Math.cos(angle + Math.PI / 6),
+                            cuptiY - arrowLength * Math.sin(angle + Math.PI / 6)
+                        );
+                        ctx.stroke();
+                    });
+                });
+            }
+            
+            ctx.setLineDash([]); // Reset line dash
+            ctx.restore();
+        }
+        
         /**
          * Draw visualization elements for an event.
          * 
@@ -1842,7 +2349,20 @@
                 if (width > 50) {
                     ctx.fillStyle = '#fff';
                     ctx.font = '10px monospace';
-                    const label = event.func || event.type;
+                    let label = event.func || event.type;
+                    // For CUPTI activities, show kernel name or activity type
+                    if (event.isCuptiActivity) {
+                        if (event.name) {
+                            label = event.name;
+                        } else if (event.type_name) {
+                            label = event.type_name;
+                        }
+                        // For memcpy/memset, show size if available
+                        if (event.size && (event.type === 'CuptiMemcpy' || event.type === 'CuptiMemset')) {
+                            const sizeMB = (event.size / (1024 * 1024)).toFixed(2);
+                            label += ` (${sizeMB}MB)`;
+                        }
+                    }
                     ctx.fillText(label, startX + 5, centerY + 3);
                 }
             } else if (event.start !== null) {
@@ -1877,7 +2397,8 @@
                 ctx.stroke();
             } else {
                 // 4. CIRCLE/DOT (no start or stop - use first state timestamp or default)
-                const firstState = event.states.length > 0 ? event.states[0].timestamp : minTime;
+                const hasStates = event.states && event.states.length > 0;
+                const firstState = hasStates ? event.states[0].timestamp : minTime;
                 startX = timeToX(firstState);
                 endX = startX + height;
                 
@@ -1891,8 +2412,9 @@
                 ctx.stroke();
             }
             
-            // 5. STATE MARKERS - Draw state transitions
+            // 5. STATE MARKERS - Draw state transitions (CUPTI activities don't have states)
             const stateBounds = [];
+            if (event.states) {
             event.states.forEach((state, stateIdx) => {
                 const stateX = timeToX(state.timestamp);
                 const isStateHighlighted = highlightedStateIdx === stateIdx;
@@ -1982,6 +2504,7 @@
                     });
                 }
             });
+            } // end if (event.states)
             
             return { startX, endX, y: centerY - height/2, height, stateBounds };
         }
@@ -2007,7 +2530,11 @@
             ctx = canvas.getContext('2d');
             
             calculateTimeRange();
-            const { lanes, eventToLane } = organizeLanes();
+            const { lanes, eventToLane, activityToLane } = organizeLanes();
+            if (!activityToLane) {
+                // Fallback if organizeLanes doesn't return activityToLane
+                activityToLane = new Map();
+            }
             
             // Restore highlighted event from key (if it still exists in filtered events)
             highlightedEvent = null;
@@ -2037,6 +2564,8 @@
             
             // Map to track rendered events (key -> event with bounds) for arrow drawing
             const renderedEventsMap = new Map();
+            // Map to track rendered CUPTI activities (key -> activity with bounds) for correlation connections
+            const renderedActivitiesMap = new Map();
             
             // Set canvas size - make it wider if zoomed in to enable horizontal scrolling
             const containerWidth = container.clientWidth - 40;
@@ -2101,46 +2630,64 @@
                         if (e.stop_tid !== undefined && e.stop_tid !== null) tids.add(e.stop_tid);
                     });
                     
-                    // Get communicator info (show first, as it's hierarchically above rank)
-                    let commLabel = '';
-                    if (firstEvent.commid && firstEvent.commid !== 'unknown') {
-                        if (eventsData.commids && eventsData.commids.length > 0) {
-                        const commIdx = eventsData.commids.indexOf(firstEvent.commid) + 1;
-                            if (commIdx > 0) {
-                        commLabel = `Comm#${commIdx}`;
+                    let label;
+                    
+                    // Check if this is a CUPTI activity lane
+                    if (firstEvent.isCuptiActivity) {
+                        // CUPTI activity lane label
+                        const deviceId = firstEvent.deviceId !== null && firstEvent.deviceId !== undefined 
+                            ? firstEvent.deviceId : '?';
+                        const activityType = firstEvent.type_name || firstEvent.type || 'Unknown';
+                        label = `CUPTI | Device ${deviceId} | ${activityType}`;
+                        if (tids.size === 1) {
+                            label += ` | tid=${Array.from(tids)[0]}`;
+                        } else if (tids.size > 1) {
+                            label += ` | tids: ${Array.from(tids).join(',')}`;
+                        }
+                        label += ` | ${laneEvents.length} activities`;
+                    } else {
+                        // NCCL event lane label
+                        // Get communicator info (show first, as it's hierarchically above rank)
+                        let commLabel = '';
+                        if (firstEvent.commid && firstEvent.commid !== 'unknown') {
+                            if (eventsData.commids && eventsData.commids.length > 0) {
+                            const commIdx = eventsData.commids.indexOf(firstEvent.commid) + 1;
+                                if (commIdx > 0) {
+                            commLabel = `Comm#${commIdx}`;
+                                } else {
+                                    // CommId not in list, show short version
+                                    const shortId = firstEvent.commid.length > 6 ? '...' + firstEvent.commid.slice(-6) : firstEvent.commid;
+                                    commLabel = `Comm(${shortId})`;
+                                }
                             } else {
-                                // CommId not in list, show short version
+                                // No commids list, show short version of this commid
                                 const shortId = firstEvent.commid.length > 6 ? '...' + firstEvent.commid.slice(-6) : firstEvent.commid;
                                 commLabel = `Comm(${shortId})`;
                             }
                         } else {
-                            // No commids list, show short version of this commid
-                            const shortId = firstEvent.commid.length > 6 ? '...' + firstEvent.commid.slice(-6) : firstEvent.commid;
-                            commLabel = `Comm(${shortId})`;
+                            commLabel = 'Comm?';
                         }
-                    } else {
-                        commLabel = 'Comm?';
+                        
+                        // Get context info (short version)
+                        let ctxLabel = '';
+                        if (firstEvent.ctx) {
+                            const shortCtx = firstEvent.ctx.length > 8 ? '...' + firstEvent.ctx.slice(-6) : firstEvent.ctx;
+                            ctxLabel = `ctx=${shortCtx}`;
+                        }
+                        
+                        label = `${commLabel} | Rank ${firstEvent.rank}`;
+                        if (ctxLabel) {
+                            label += ` | ${ctxLabel}`;
+                        }
+                        if (tids.size === 1) {
+                            // All events have the same thread ID
+                            label += ` | tid=${Array.from(tids)[0]}`;
+                        } else if (tids.size > 1) {
+                            // Multiple thread IDs in this lane
+                            label += ` | tids: ${Array.from(tids).join(',')}`;
+                        }
+                        label += ` | ${laneEvents.length} events`;
                     }
-                    
-                    // Get context info (short version)
-                    let ctxLabel = '';
-                    if (firstEvent.ctx) {
-                        const shortCtx = firstEvent.ctx.length > 8 ? '...' + firstEvent.ctx.slice(-6) : firstEvent.ctx;
-                        ctxLabel = `ctx=${shortCtx}`;
-                    }
-                    
-                    let label = `${commLabel} | Rank ${firstEvent.rank}`;
-                    if (ctxLabel) {
-                        label += ` | ${ctxLabel}`;
-                    }
-                    if (tids.size === 1) {
-                        // All events have the same thread ID
-                        label += ` | tid=${Array.from(tids)[0]}`;
-                    } else if (tids.size > 1) {
-                        // Multiple thread IDs in this lane
-                        label += ` | tids: ${Array.from(tids).join(',')}`;
-                    }
-                    label += ` | ${laneEvents.length} events`;
                     
                     ctx.fillStyle = '#858585';
                     ctx.font = '11px monospace';
@@ -2173,8 +2720,12 @@
                         event._stateBounds = bounds.stateBounds;
                     }
                     
-                    // Add to rendered events map for arrow drawing
-                    renderedEventsMap.set(key, event);
+                    // Add to appropriate rendered map for arrow/connection drawing
+                    if (event.isCuptiActivity) {
+                        renderedActivitiesMap.set(key, event);
+                    } else {
+                        renderedEventsMap.set(key, event);
+                    }
                 });
             });
             
@@ -2192,6 +2743,11 @@
             // Draw profiler lifecycle connections (connecting init and finalize events)
             if (showProfilerLifecycleLines) {
                 drawProfilerLifecycleConnections(renderedEventsMap, eventToLane);
+            }
+            
+            // Draw correlation connections (connecting NCCL events to CUPTI activities via extCorrId)
+            if (showCorrelationConnections && renderedActivitiesMap.size > 0) {
+                drawCorrelationConnections(renderedEventsMap, renderedActivitiesMap, eventToLane, activityToLane);
             }
             
             // Draw selection rectangle if selecting
@@ -2486,6 +3042,99 @@
                 lines.push('<strong>Parent Event:</strong>');
             }
             
+            // Check if this is a CUPTI activity
+            if (event.isCuptiActivity) {
+                // CUPTI Activity Information
+                lines.push(`<strong style="color: #00d4ff;">CUPTI Activity</strong>`);
+                lines.push(`Activity Type: ${event.type_name || event.type || 'Unknown'}`);
+                
+                if (event.name) {
+                    lines.push(`Kernel/Function Name: ${event.name}`);
+                }
+                
+                if (event.deviceId !== null && event.deviceId !== undefined) {
+                    lines.push(`Device ID: ${event.deviceId}`);
+                }
+                
+                if (event.stream) {
+                    lines.push(`Stream: ${event.stream}`);
+                }
+                
+                if (event.size) {
+                    const sizeMB = (event.size / (1024 * 1024)).toFixed(2);
+                    lines.push(`Size: ${event.size} bytes (${sizeMB} MB)`);
+                }
+                
+                if (event.gpuUuid) {
+                    lines.push(`GPU UUID: ${event.gpuUuid}`);
+                }
+                
+                // Process and thread IDs
+                if (event.start_pid !== undefined && event.start_pid !== null) {
+                    if (event.stop_pid !== undefined && event.stop_pid !== null && event.start_pid !== event.stop_pid) {
+                        lines.push(`<strong style="color: #f48771;">Start Process ID: ${event.start_pid}</strong>`);
+                        lines.push(`<strong style="color: #f48771;">Stop Process ID: ${event.stop_pid}</strong> (different process!)`);
+                    } else {
+                        lines.push(`Process ID: ${event.start_pid}`);
+                    }
+                }
+                
+                if (event.start_tid !== undefined && event.start_tid !== null) {
+                    if (event.stop_tid !== undefined && event.stop_tid !== null && event.start_tid !== event.stop_tid) {
+                        lines.push(`<strong style="color: #f48771;">Start Thread ID: ${event.start_tid}</strong>`);
+                        lines.push(`<strong style="color: #f48771;">Stop Thread ID: ${event.stop_tid}</strong> (different thread!)`);
+                    } else {
+                        lines.push(`Thread ID: ${event.start_tid}`);
+                    }
+                }
+                
+                if (event.extCorrId !== null && event.extCorrId !== undefined) {
+                    lines.push(`<strong style="color: #00d4ff;">External Correlation ID: ${event.extCorrId}</strong>`);
+                }
+                
+                if (event.corrId !== null && event.corrId !== undefined) {
+                    lines.push(`CUPTI Correlation ID: ${event.corrId}`);
+                }
+                
+                // CUPTI-specific details
+                if (event.details && Object.keys(event.details).length > 0) {
+                    lines.push('');
+                    lines.push('Activity Details:');
+                    for (const [key, value] of Object.entries(event.details)) {
+                        if (typeof value === 'object') {
+                            lines.push(`  ${key}: ${JSON.stringify(value)}`);
+                        } else {
+                            lines.push(`  ${key}: ${value}`);
+                        }
+                    }
+                }
+                
+                // Show correlated NCCL events (using composite key with PID)
+                if (event.extCorrId !== null && event.extCorrId !== undefined && eventsData.extCorrIdToNcclEvents) {
+                    const pid = event.start_pid !== null && event.start_pid !== undefined 
+                        ? event.start_pid 
+                        : (event.stop_pid !== null && event.stop_pid !== undefined ? event.stop_pid : null);
+                    const correlationKey = pid !== null ? `${event.extCorrId}_${pid}` : String(event.extCorrId);
+                    const correlatedEvents = eventsData.extCorrIdToNcclEvents.get(correlationKey) || [];
+                    if (correlatedEvents.length > 0) {
+                        lines.push('');
+                        lines.push(`<strong style="color: #00d4ff;">Correlated NCCL Events (${correlatedEvents.length}):</strong>`);
+                        correlatedEvents.forEach((ncclKey, idx) => {
+                            const ncclEvent = eventsData.events[ncclKey];
+                            if (ncclEvent) {
+                                lines.push(`  ${idx + 1}. ${ncclEvent.type_name || ncclEvent.type || 'Unknown'}`);
+                                if (ncclEvent.func) {
+                                    lines.push(`     Function: ${ncclEvent.func}`);
+                                }
+                                if (ncclEvent.rank !== undefined && ncclEvent.rank !== null) {
+                                    lines.push(`     Rank: ${ncclEvent.rank}`);
+                                }
+                            }
+                        });
+                    }
+                }
+            } else {
+                // NCCL Event Information
             // Event descriptor type (most important)
             if (event.type_name) {
                 lines.push(`Event Type: ${event.type_name}`);
@@ -2505,6 +3154,40 @@
             
             // Basic info
             lines.push(`Rank: ${event.rank !== undefined ? event.rank : 'N/A'}`);
+                
+                // Show correlation ID if present
+                if (event.extCorrId !== null && event.extCorrId !== undefined) {
+                    lines.push(`<strong style="color: #00d4ff;">External Correlation ID: ${event.extCorrId}</strong>`);
+                }
+                
+                // Show correlated CUPTI activities (using composite key with PID)
+                if (event.extCorrId !== null && event.extCorrId !== undefined && eventsData.extCorrIdToCuptiActivities) {
+                    const pid = event.start_pid !== null && event.start_pid !== undefined 
+                        ? event.start_pid 
+                        : (event.stop_pid !== null && event.stop_pid !== undefined ? event.stop_pid : null);
+                    const correlationKey = pid !== null ? `${event.extCorrId}_${pid}` : String(event.extCorrId);
+                    const correlatedActivities = eventsData.extCorrIdToCuptiActivities.get(correlationKey) || [];
+                    if (correlatedActivities.length > 0) {
+                        lines.push('');
+                        lines.push(`<strong style="color: #00d4ff;">Correlated CUPTI Activities (${correlatedActivities.length}):</strong>`);
+                        correlatedActivities.forEach((activityKey, idx) => {
+                            const activity = eventsData.cuptiActivities[activityKey];
+                            if (activity) {
+                                lines.push(`  ${idx + 1}. ${activity.type_name || activity.type || 'Unknown'}`);
+                                if (activity.name) {
+                                    lines.push(`     Kernel: ${activity.name}`);
+                                }
+                                if (activity.deviceId !== null && activity.deviceId !== undefined) {
+                                    lines.push(`     Device: ${activity.deviceId}`);
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+            
+            // Common fields (for NCCL events only, not CUPTI activities)
+            if (!event.isCuptiActivity) {
             if (event.commid) {
                 // Show commid with shortened display
                 const shortId = event.commid.length > 12 ? '...' + event.commid.slice(-12) : event.commid;
@@ -2652,6 +3335,7 @@
                     }
                 });
             }
+            } // End of if (!event.isCuptiActivity)
             
             // Display in info panel (with line breaks for readability)
             const infoText = document.getElementById('info-text');
