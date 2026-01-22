@@ -36,7 +36,9 @@ If no plugin was found (neither user defined nor default), do not enable profili
 
 " (quoted from docs: https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html#nccl-profiler-plugin)
 
-#### 1.2 The profiler API
+The exact implementation details can be found at **/src/plugin/plugin_open.cc** and **/src/plugin/profiler.cc**
+
+### 1.2 The profiler API
 The plugin must implement a profiler API specified by NCCL, in the form of exposing a struct. This struct should contain pointers to all the functions required by the API
 ```c
 typedef struct {
@@ -60,7 +62,7 @@ The NCCL code is instrumented with profiler callbacks at different levels to cap
 
 As the API function names suggest, this will allow the profiler to track these activities as events.
 
-The exact profiler API can be found under **@/src/include/plugin/profiler/**. As of NCCL release v2.29.2, five functions must be implemented.
+The exact profiler API can be found under **/src/include/plugin/profiler/**. As of NCCL release v2.29.1, five functions must be implemented.
 
 `init` initializes the profiler plugin. NCCL passes various arguments as shown below. 
 TODO the exact points where NCCL calls the API will be discussed in section #### 1.3 TODO make this a link
@@ -78,7 +80,7 @@ ncclResult_t init(
 ```
 Notably, `void** context` is an opaque handle that the plugin developer should point to any custom context object. This pointer is then again passed as argument in the other API calls `startEvent` and `finalize`. This context object is separate across communicators.
 
-the plugin developer should point `int* eActivationMask` to a bitmask, which tells nccl which type of events that the profiler plugin wants to track. Each bit corresponds to a different event type. The mappings can be found at **@/src/include/plugin/nccl_profiler.h**. internally this bitmask is initialized with `0`, which means no events will be tracked by default. Setting it to `4095` will track all events.
+the plugin developer should point `int* eActivationMask` to a bitmask, which tells nccl which type of events that the profiler plugin wants to track. Each bit corresponds to a different event type. The mappings can be found at **/src/include/plugin/nccl_profiler.h**. internally this bitmask is initialized with `0`, which means no events will be tracked by default. Setting it to `4095` will track all events.
 
 TODO what to do with `ncclDebugLogger_t logfn` ?
 
@@ -99,11 +101,12 @@ ncclResult_t startEvent(
 ```
 The plugin developer should point `void** eHandle` to a custom event object. this pointer is then again passed as argument in the other API calls `stopEvent` and `recordEventState` to refer to the same event object. `void* context` passes the context object for this communicator in the profiler
 
-`ncclProfilerEventDescr_v5_t* eDescr` is a struct that contains all the information that nccl populates to describe the started event. Exact details can be found under the profiler API **@/src/include/plugin/profiler/**. Notably, the event descriptor struct contains a field `void* parentObj`, which is the event handle to the parent event of this event (`null` if it has no parent). The different types of events follow an event hierarchy, with parent events preceding the child event.
+`ncclProfilerEventDescr_v5_t* eDescr` is a struct that contains all the information that nccl populates to describe the started event. Exact details can be found under the profiler API **/src/include/plugin/profiler/**. Notably, the event descriptor struct contains a field `void* parentObj`, which is the event handle to the parent event of this event (`null` if it has no parent). The different types of events follow an event hierarchy, with parent events preceding the child event.
 
 "
 
 NCCL core events (reported above) are organized into a hierarchy as reported below:
+```
 Group API event
    |
    +- Collective API event
@@ -133,14 +136,14 @@ Group API event
    +- Kernel Launch event
 
 ProxyCtrl event
-
+```
 " (quote from **/ext-profiler/README.md**)
 
 As a consequence of the `eDescr` having the `parentObj` field, event types of parent events will also be tracked if the profiler enables tracking for event types of events that are children of those.
 
-Unless the user sets the environment variable `NCCL_PXN_DISABLE` to 0 (defaults to 1), the PXN feature (PCI x NVLink - inter-node communication using a non-local NIC, using NVLink and an intermediate GPU) causes some proxy operations to be processed in a remote proxy thread that differs from the one that generated the operation. When this happens, dereferencing the parent event, provided by NCCL in the event descriptor during `startEvent()`, is not possible and the event hierarchy reported above may not be utilized. The event descriptor for `ProxyOp` events includes the PID of the originator, which the profiler plugin can match against the local PID to check if the remote proxy thread is in the same address space of the proxy thread originating the operation to dereference the parent event. 
+Unless the user sets the environment variable `NCCL_PXN_DISABLE` to 0 (defaults to 1) to disable the PXN feature (PCI x NVLink - inter-node communication using a non-local NIC, using NVLink and an intermediate GPU), this causes some proxy operations to be processed in a remote proxy thread that differs from the one that generated the operation. When this happens, dereferencing the parent event, provided by NCCL in the event descriptor during `startEvent()`, is not possible and the event hierarchy reported above may not be utilized. The event descriptor for `ProxyOp` events includes the PID of the originator, which the profiler plugin can match against the local PID to check if the remote proxy thread is in the same address space of the proxy thread originating the operation to dereference the parent event. 
 
-Unfortunately, the ProxyOp' child event `ProxyStep` do not provide this field. However `startEvent()` also passes the `context` of the event, where a similar dynamic is present and it sometimes should not be dereferenced because the PXN feature. The profiler plugin may internally track which context objects have been created over (potentially multiple) `init()` calls. If the passed `context` object during `startEvent()` is not present in the profilers tracked contexts, then this indicates that the event did not originate from this process because of the PXN feature. 
+Unfortunately, the ProxyOp' child event `ProxyStep` do not provide this field. However `startEvent()` also passes the `context` of the event, where a similar dynamic is present and it sometimes should not be dereferenced because the PXN feature. The profiler plugin may internally track which context objects have been created on this process over (potentially multiple thread-level) `init()` calls. If the passed `context` object during `startEvent()` is not present in the profilers tracked contexts, then this indicates that the event did not originate from this process because of the PXN feature. 
 TODO See #### 1.3 Where NCCL triggers profiler API callbacks for more information on when `init()` is called TODO make this a link
 
 
@@ -150,7 +153,7 @@ TODO the exact points where NCCL calls the API will be discussed in section ####
 ncclResult_t stopEvent(void* eHandle);  // handle to event object
 ```
 
-Some event types may be updated through calls to `recordEventState`, which can update the state, along with event attributes. These type of events can go through several states during their lifecycle. The list of supported states for the updatable events can be found under the profiler API **@/src/include/plugin/profiler/**
+Some event types may be updated through calls to `recordEventState`, which can update the state, along with event attributes. These type of events can go through several states during their lifecycle. The list of supported states for the updatable events can be found under the profiler API **/src/include/plugin/profiler/**
 The exact points where NCCL calls these functions WILL NOT be discussed in this report TODO likely true, but should come back here in case I do
 ```c
 ncclResult_t recordEventState(
@@ -160,8 +163,8 @@ ncclResult_t recordEventState(
 );
 ```
 
-When the profiler for a communicator is no longer needed, a call to `finalize()` is destroys the profiler context and frees up resources.
-TODO See #### 1.3 Where NCCL triggers profiler API callbacks for more information on when `init()` is called TODO make this a link
+When the profiler for a communicator is no longer needed, a call to `finalize()` is made and should destroy the profiler context and free up resources.
+TODO See #### 1.3 Where NCCL triggers profiler API callbacks for more information on when `finalize()` is called TODO make this a link
 ```c
 ncclResult_t finalize(void* context);  // opaque profiler context object
 ```
@@ -176,23 +179,325 @@ The name field should point to a character string with the name of the profiler 
 
 ### 1.3 Where nccl triggers profiler API callbacks
 
-TODO "
+Below each callback to the profiler API will be explained. They can be categorized in following groups:
+- callbacks for profiler initialization and finalization
+- callbacks to the profiler API for events directly related to the application calling the NCCL API (e.g. `ncclAllReduce()`)
+- callbacks to the profiler API for network events triggered by the proxy progress thread processing network requests
+- TODO add copy engine based events section?
+
+- callbacks to the profiler API for events related to the application calling the NCCL API (e.g. `ncclAllReduce()`)
+
+#### Callbacks for profiler initialization and finalization
+
+The profiler API's `init()` function is called in `ncclProfilerPluginInit()` during the initialization of nccl. This function call first triggers the profiler loading mechanism described in section 1.2 TODO make this a link. If the loading succeeds, the profiler plugins's `init()` function is called. 
+
+NCCL calls `ncclProfilerPluginInit()` during its initialization after a user API call to create ranks for a new communicator. As of NCCL release 2.29.1, the following
+depicts the flow from user API call to NCCL calling ncclProfilerPluginInit():
+
+```plaintext
+User API                          Internal Flow
+─────────────────────────────────────────────────────────────────────
+ncclCommInitRank()          ─┐
+ncclCommInitAll()            │
+ncclCommInitRankConfig()     ├──► ncclCommInitRankDev() ────┐
+ncclCommInitRankScalable()  ─┘                              │
+                                                            │
+ncclCommSplit()             ─┐                              │
+ncclCommShrink()            ─┴──► ncclCommInitChildComm()───┤
+                                                            │
+ncclCommGrow()              ────────────────────────────────┤
+                                                            │
+                                                            ▼
+                                                    ncclCommInitRankFunc()
+                                                            │
+                                                            ▼
+                                                    initTransportsRank()
+                                                            │
+                                                            ▼
+                                                    ncclProfilerPluginInit(comm)
+                                                            │
+                                                            ▼
+                                                    ncclProfilerPluginLoad()
+                                                    profiler->init()
+```
+
+The implementation can be found at **/src/init.cc** and **/src/plugin/profiler.cc**.
+
+The profiler API's `finalize()` function is called in `ncclProfilerPluginFinalize()` 
+after a user API call is made to free resources associated with the communicator object. Afterwards the profiler is also unloaded by eventually calling `dlclose(handle);`
+
+```plaintext
+User API                          Internal Flow
+─────────────────────────────────────────────────────────────────────
+ncclCommAbort()    ─┐
+ncclCommDestroy()  ─┴───────────► commReclaim() ──┐
+                                                  │
+                                                  ▼
+                                      ncclProfilerPluginFinalize()
+                                                  │
+                                                  ▼
+                                      ncclProfiler->finalize()
+                                      ncclProfilerPluginUnload()
+
+```
+See implementation details at **/src/init.cc**, **/src/plugin/profiler.cc** and **/src/plugin/plugin_open.cc**.
+
+#### Callbacks for events related to NCCL API calls
+
+"
+
 NCCL profile API events are generated when the API calls are made, right after NCCL checks for graph capture information. They parent collective, point-to-point and kernel launch events and persist across multiple operations in a group.
 
-ncclProfileKernelLaunch events are generated when the CUDA call to a kernel launch is made. In the case of graph capture, the event start indicates that the kernel launch operation has been recorded, not launched.
-
-ncclProfileProxyOp events are generated by the proxy progress thread while it is processing network requests for the GPU kernel. ProxyOp events are generated for every active channel and provide a summary of the activity of the proxy progress thread for that channel. Most of the states for this event were duplicated with ncclProfileProxyStep events. Therefore, starting with version 4 of the profiler interface these states have been deprecated. The same level of information can still be obtained through the ncclProfileProxyStep events.
-
-ncclProfileProxyStep events are generated by the proxy progress thread while it is processing network requests for the GPU kernel. ProxyStep events describe individual network transfer in the channel. Thus, they provide a more fine-grained view w.r.t. ProxyOp events.
-
-ncclProfileProxyCtrl events are generated by the proxy progress thread while it is not processing network requests for the GPU kernel. This includes everything else that the proxy thread might be doing, including appending new ncclProxyOp objects to the list of work elements to process.
-
-ncclProfileKernelCh events are generated by the profiler proxy progress function while the kernel processes work items for the enqueued NCCL operations.
-
-ncclProfileNetPlugin events are generated by the network plugin. Network plugins are free to define their own set of events and communicate them to the profiler plugin using ncclProfileNetPlugin and the ncclProfilerCallback\_t NCCL core callback. The network and profiler plugin can agree on the network defined event definition using the plugin id in the event descriptor. The plugin identifier is a 64-bit integer that has two parts: the 16 LSB are assigned to the plugin event version, the next 16 bits are assigned to the plugin type (NCCL_PROFILER_NET_TYPE_IB, ...). The rest of the bits are unused and available for future extensions.
 " (quote from from **/ext-profiler/README.md**)
 
+TODO: @cursor_nccl_profiling_event_flow.md
+
 #### proxy progress thread - callbacks when processing network requests
+
+TODO: @cursor_nccl_profiling_event_flow.md
+
+during nccl initialization, after calling `ncclProfilerPluginInit()`, `ncclProxyCreate(comm)` is called. This creates a new thread `ncclProxyService`. If needed this Proxy Service will launch `ncclProxyProgress`. It is created only once by checking `!state->thread` which is a process wide shared resource.
+
+"
+
+```c
+  /* proxyState is shared among parent comm and split comms. comm->proxyState->thread is
+   * pthread_join()'d by commFree() in init.cc when the refCount reduces down to 0. */
+```
+
+" (quote from **/src/proxy.cc**) 
+
+
+Callbacks to the profiler API for network progress will happen from this Proxy Progress Thread.
+
+The code that causes this chain is featured below
+as pseudo code snippets:
+
+
+**/src/init.cc**
+```c
+initTransportsRank() {
+  ncclProfilerPluginInit(comm);
+  ncclProxyCreate(comm);
+    pthread_create(&comm->proxyState->thread, NULL, ncclProxyService, comm->proxyState)
+}
+```
+
+**/src/proxy.cc**
+```c
+void* ncclProxyService(void* _args) {
+  proxyProgressAsync(..., proxyState, ...);
+
+  /* different code path */ 
+
+  proxyServiceInitOp(..., proxyState, ...);
+    proxyProgressAsync(..., proxyState, ...);
+}
+
+static ncclResult_t proxyProgressAsync(..., struct ncclProxyState* proxyState, ...) {
+  proxyConnInit(..., proxyState, ...) {
+    proxyProgressInit(proxyState) {
+      ncclProxyProgressCreate(proxyState) {
+        struct ncclProxyProgressState* state = &proxyState->progressState;
+        if (!state->thread) pthread_create(&state->thread, NULL, ncclProxyProgress, proxyState);     
+      }
+    }
+  }
+}
+
+ncclProxyProgress(proxyState){
+  // Emits ProxyStep events
+  progressOps(proxyState, ..., opStart=state->active, ...) {
+      struct ncclProxyArgs* op = opStart;
+      while (op) {
+          op->progress(proxyState, op)
+          op = op->next;
+      }
+  }
+
+  // Emits ProxyCtrl events when transitioning between idle/active
+  ncclProfilerStartProxyCtrlEvent(...);
+  if (lastIdle == 0 && idle == 1) ncclProfilerRecordProxyCtrlEventState(..., ncclProfilerProxyCtrlIdle);
+  if (lastIdle == 1 && idle == 0) ncclProfilerRecordProxyCtrlEventState(..., ncclProfilerProxyCtrlActive);
+  ncclProfilerStopProxyCtrlEvent(...);
+
+  ncclProxyGetPostedOps(proxyState) {
+    struct ncclProxyProgressState* state = &proxyState->progressState;
+    struct ncclProxyOpsPool* pool = state->opsPool;
+    
+    // Emits ProxyCtrl events when transitioning between sleep/wakeup
+    if (state->active == NULL) {
+      pthread_mutex_lock(&pool->mutex);
+      if (pool->nextOps == -1 && !state->stop) {
+        ncclProfilerStartProxyCtrlEvent();
+        
+        ncclProfilerRecordProxyCtrlEventState(..., ncclProfilerProxyCtrlSleep);
+        pthread_cond_wait(&pool->cond, &pool->mutex);
+        ncclProfilerRecordProxyCtrlEventState(..., ncclProfilerProxyCtrlWakeup);
+        
+        ncclProfilerStopProxyCtrlEvent();
+      }
+    }
+
+    // update pool
+    state->nextOps = pool->nextOps;
+    pool->nextOps = pool->nextOpsEnd = -1;
+    pthread_mutex_unlock(&pool->mutex);
+
+    // Emits ProxyCtrl events when appending proxyOps
+    ncclProfilerStartProxyCtrlEvent();
+    ncclProfilerRecordProxyCtrlEventState(..., ncclProfilerProxyCtrlAppend);
+    ProxyAppend() {
+        
+      ncclProxyOpToArgs()
+      // Emits ProxyOp events
+      if (args->pattern != ncclPatternProfiler) ncclProfilerStartProxyOpEvent();
+    }
+  }
+}
+```
+
+`op->progress()` progresses transport specific ops. this is just a function pointer type (similar to interfaces in OOP) defined at **/src/include/proxy.h**
+
+```c
+typedef ncclResult_t (*proxyProgressFunc_t)(struct ncclProxyState*, struct ncclProxyArgs*);
+proxy
+
+struct ncclProxyArgs {
+  proxyProgressFunc_t progress;
+  
+  struct ncclProxyArgs* next;
+
+/* other fields */
+}
+```
+(confusingly the variable is called `op`, although its type is `ncclProxyArgs` and NOT `ncclProxyOp`).
+
+Which specific function this calls depends on the op. check the different ProxyProgress functions under 
+**/src/transport/net.cc**, **/src/transport/coll_net.cc**, **/src/transport/p2p.cc**, **/src/transport/shm.cc** and **/src/transport/shm.cc**.
+
+In these specific functions, calls to the profiler API are eventually made. These notify the profiler plugin about the following type of events
+- `ProxyStep`
+- `KernelCh`
+- Network plugin specific events
+
+===========
+
+The following paths eventually reach `ncclProxyPost()` where Ops will be posted to a pool and proxy progress thread will be signalled. The thread reads from this pool when calling `ncclProxyGetPostedOps()`
+
+```c
+any of these NCCL API calls (
+ncclCommInitAll()  // init.cc
+ncclCommInitRankConfig()  // init.cc
+ncclCommInitRankScalable()  // init.cc
+ncclCommFinalize()  // init.cc
+ncclCommDestroy()  // init.cc
+ncclCommRevoke()  // init.cc
+ncclCommAbort()  // init.cc
+ncclCommSplit()  // init.cc
+ncclCommShrink()  // init.cc
+ncclCommGrow()  // init.cc
+ncclDevCommCreate()  // dev_runtime.cc
+ncclCommWindowRegister()  // dev_runtime.cc
+ncclGroupSimulateEnd()  // group.cc
+ncclGroupEnd()  // group.cc
+) {
+  ncclGroupEndInternal()
+}
+```
+
+```c
+any of these NCCL API calls (
+ncclAllGather() // collectives.cc
+ncclAlltoAll() // collectives.cc
+ncclAllReduce() // collectives.cc
+ncclBroadcast() // collectives.cc
+ncclGather() // collectives.cc
+ncclReduce() // collectives.cc
+ncclReduceScatter() // collectives.cc
+ncclScatter() // collectives.cc
+ncclSend() // collectives.cc
+ncclRecv() // collectives.cc
+) {
+  ncclEnqueueCheck() { // enqueue.cc
+    ncclGroupEndInternal()
+  }
+}
+```
+
+```c
+ncclGroupEndInternal() {
+  if (...) {
+    groupLaunchNonBlocking()
+      groupLaunch(&groupJob->base, NULL)
+  } else {
+    groupLaunch(&groupJob->base, internalSimInfoPtr)
+  }
+}
+```
+
+```c
+groupLaunch(&groupJob->base, internalSimInfoPtr) {
+  doLaunches(groupCommHeadMain[ncclGroupTaskTypeCollective])
+}
+```
+
+```c
+doLaunches(struct ncclComm* head) {
+  plan = comm->planner.unlaunchedPlansHead;
+  ncclLaunchKernelAfter_NoCuda(comm, plan) {
+    hostStreamPlanTask(comm, plan)
+  }
+
+  /* different code path */ 
+
+  ncclLaunchPrepare(comm) {
+    plan = ncclMemoryPoolAlloc<struct ncclKernelPlan>(...);
+    cudaLaunchHostFunc(hostStream, hostStreamPlanCallback, plan) {
+      hostStreamPlanCallback(void *plan_) {
+        hostStreamPlanTask(plan->comm, plan)
+      }
+    }
+  }
+}
+```
+    
+```c
+hostStreamPlanTask(comm, plan) {
+  uploadProxyOps(comm, plan) {
+    ncclProxySaveOp() {
+      SaveProxy() {
+        ncclLocalOpAppend() {
+          if (...) {
+            ncclProxyPost()
+          }
+        }
+      }
+    }
+  }
+  ncclProxyStart(comm) {
+    ncclProxyPost()
+  }
+}
+```
+
+```c
+ncclResult_t ncclProxyPost(struct ncclProxyOpsPool* pool, int nextOps, int nextOpsEnd) {
+  pthread_mutex_lock(&pool->mutex);
+  if (...) {
+    pool->nextOps = nextOps;
+    pthread_cond_signal(&pool->cond);
+  } 
+  pool->nextOpsEnd = nextOpsEnd;
+  pthread_mutex_unlock(&pool->mutex);
+}
+```
+
+#### TODO include copyengine events (v2.29.1)?
+
+
+#### TODO section intro title?
+In a multi node HPC environment, a typical case for NCCL applications, besides the behaviour of NCCL making callbacks to the profiler, NCCL itself gets instantiated multiple times, which affects the total number of callbacks to the profiler. To better understand the profiling behaviour, the different settings below will each demonstrate the behaviour of callbacks to the profiler plugin.
 
 TODO the next two subpoints below is one suggestion on how to think about different scenarios (number of nccl launches, profiler launches, per node, per thread...).
 not sure how much sense they make or if some other way of differentiation is better. work through the individual questions/points/todos within those subpoints and it will become clear what makes most sense!
