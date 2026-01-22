@@ -52,7 +52,7 @@ typedef struct {
 ```
 The struct type itself also indicates which API version is implemented.
 The profiler API has changed multiple times with newer NCCL releases. New releases seem to have limited backwards compatibility with older plugins (TODO requires fact check. iirc there was some verison breaking feature that didnt allow backwards compatibilty to v2? but new nccl relreases certainly still feature the structs for older versions @/src/include/plugin/profiler).
-A plugin may expose multiple versioned structs to allow by for backwards compatibility with older NCCL releases.
+A plugin may expose multiple versioned structs to allow for backwards compatibility with older NCCL releases.
 
 "
 
@@ -179,7 +179,7 @@ The name field should point to a character string with the name of the profiler 
 
 ### 1.3 Where nccl triggers profiler API callbacks
 
-Below each callback to the profiler API will be explained. They can be categorized in following groups:
+Below, the callbacks to the profiler API will be explained. They can be categorized in following groups:
 - callbacks for profiler initialization and finalization
 - callbacks to the profiler API for events directly related to the application calling the NCCL API (e.g. `ncclAllReduce()`)
 - callbacks to the profiler API for network events triggered by the proxy progress thread processing network requests
@@ -196,7 +196,7 @@ depicts the flow from user API call to NCCL calling ncclProfilerPluginInit():
 
 ```plaintext
 User API                          Internal Flow
-─────────────────────────────────────────────────────────────────────
+─────────────────────────────────────────────────────────────────────────────────
 ncclCommInitRank()          ─┐
 ncclCommInitAll()            │
 ncclCommInitRankConfig()     ├──► ncclCommInitRankDev() ────┐
@@ -256,7 +256,7 @@ TODO: @cursor_nccl_profiling_event_flow.md
 
 TODO: @cursor_nccl_profiling_event_flow.md
 
-during nccl initialization, after calling `ncclProfilerPluginInit()`, `ncclProxyCreate(comm)` is called. This creates a new thread `ncclProxyService`. If needed this Proxy Service will launch `ncclProxyProgress`. It is created only once by checking `!state->thread` which is a process wide shared resource.
+during nccl initialization, after calling `ncclProfilerPluginInit()`, `ncclProxyCreate(comm)` is called. This creates a new thread `ncclProxyService`. If needed this Proxy Service will launch another thread `ncclProxyProgress`. Proxy Progress is created only once by checking `!state->thread` which is a process wide shared resource.
 
 "
 
@@ -579,6 +579,8 @@ Without both proxy and/or kernel activity it is impossible for the profiler to f
 Kernel events instrumentation leverages counters exposed by the kernel to the host and the proxy progress thread. Thus, the proxy progress thread infrastructure is shared between the network and the profiler. If the proxy is serving network requests the kernel profiling probing can be delayed, causing loss of accuracy. Similarly, if the CPU is under heavy load and the scheduling of the proxy progress thread is delayed, a similar loss of accuracy can be encountered.
 
 To mitigate this effect, with version 4 of the profiler NCCL uses a per-channel ring buffer of 64 elements. Every counter is complemented by two timestamps (ptimers) supplied by the NCCL kernel (one for start and one for stop of the operation in the kernel). NCCL propagates these timestamps to the profiler plugin that it can convert them to CPU time domain.
+
+## Comparison to MPI TODO ???
 
 # TODO
 link code snippets to source code files+lines
