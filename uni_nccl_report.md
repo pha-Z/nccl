@@ -267,108 +267,87 @@ during nccl initialization, after calling `ncclProfilerPluginInit()`, `ncclProxy
 
 " (quote from **/src/proxy.cc**) 
 
-
-Callbacks to the profiler API for network progress will happen from this Proxy Progress Thread.
-
-The code that causes this chain is featured below
-as pseudo code snippets:
-
-
-**/src/init.cc**
-```c
-initTransportsRank() {
-  ncclProfilerPluginInit(comm);
-  ncclProxyCreate(comm);
-    pthread_create(&comm->proxyState->thread, NULL, ncclProxyService, comm->proxyState)
-}
+```plaintext
+Thread Creation Flow
+─────────────────────────────────────────────────────────────────────────────────
+initTransportsRank() (init.cc)
+        │
+        ├──► ncclProfilerPluginInit(comm)
+        │
+        ▼
+        ncclProxyCreate(comm)
+        │
+        ▼
+        pthread_create(&comm->proxyState->thread, NULL, ncclProxyService, ...)
+        │
+        ▼
+        [New Thread] ncclProxyService()
+        │
+        ├──► proxyProgressAsync(...)
+        │    │
+        │    └──► proxyConnInit(...)
+        │         │
+        │         └──► proxyProgressInit(proxyState)
+        │              │
+        │              └──► ncclProxyProgressCreate(proxyState)
+        │                   │
+        │                   └──► if (!state->thread)
+        │                             pthread_create(&state->thread, NULL, 
+        │                                        ncclProxyProgress, proxyState)
+        │                             │
+        │                             ▼
+        │                             [New Thread] ncclProxyProgress()
+        │                             (only created once per process)
+        │
+        └──► proxyServiceInitOp(...)
+             └──► proxyProgressAsync(...)  (same path as above)
 ```
+
+Callbacks to the profiler API for network progress will happen from this Proxy Progress Thread:
 
 **/src/proxy.cc**
-```c
-void* ncclProxyService(void* _args) {
-  proxyProgressAsync(..., proxyState, ...);
-
-  /* different code path */ 
-
-  proxyServiceInitOp(..., proxyState, ...);
-    proxyProgressAsync(..., proxyState, ...);
-}
-
-static ncclResult_t proxyProgressAsync(..., struct ncclProxyState* proxyState, ...) {
-  proxyConnInit(..., proxyState, ...) {
-    proxyProgressInit(proxyState) {
-      ncclProxyProgressCreate(proxyState) {
-        struct ncclProxyProgressState* state = &proxyState->progressState;
-        if (!state->thread) pthread_create(&state->thread, NULL, ncclProxyProgress, proxyState);     
-      }
-    }
-  }
-}
-
-ncclProxyProgress(proxyState){
-  // Emits ProxyStep events
-  progressOps(proxyState, ..., opStart=state->active, ...) {
-      struct ncclProxyArgs* op = opStart;
-      while (op) {
-          op->progress(proxyState, op)
-          op = op->next;
-      }
-  }
-
-  // Emits ProxyCtrl events when transitioning between idle/active
-  ncclProfilerStartProxyCtrlEvent(...);
-  if (lastIdle == 0 && idle == 1) ncclProfilerRecordProxyCtrlEventState(..., ncclProfilerProxyCtrlIdle);
-  if (lastIdle == 1 && idle == 0) ncclProfilerRecordProxyCtrlEventState(..., ncclProfilerProxyCtrlActive);
-  ncclProfilerStopProxyCtrlEvent(...);
-
-  ncclProxyGetPostedOps(proxyState) {
-    struct ncclProxyProgressState* state = &proxyState->progressState;
-    struct ncclProxyOpsPool* pool = state->opsPool;
-    
-    // Emits ProxyCtrl events when transitioning between sleep/wakeup
-    if (state->active == NULL) {
-      pthread_mutex_lock(&pool->mutex);
-      if (pool->nextOps == -1 && !state->stop) {
-        ncclProfilerStartProxyCtrlEvent();
-        
-        ncclProfilerRecordProxyCtrlEventState(..., ncclProfilerProxyCtrlSleep);
-        pthread_cond_wait(&pool->cond, &pool->mutex);
-        ncclProfilerRecordProxyCtrlEventState(..., ncclProfilerProxyCtrlWakeup);
-        
-        ncclProfilerStopProxyCtrlEvent();
-      }
-    }
-
-    // update pool
-    state->nextOps = pool->nextOps;
-    pool->nextOps = pool->nextOpsEnd = -1;
-    pthread_mutex_unlock(&pool->mutex);
-
-    // Emits ProxyCtrl events when appending proxyOps
-    ncclProfilerStartProxyCtrlEvent();
-    ncclProfilerRecordProxyCtrlEventState(..., ncclProfilerProxyCtrlAppend);
-    ProxyAppend() {
-        
-      ncclProxyOpToArgs()
-      // Emits ProxyOp events
-      if (args->pattern != ncclPatternProfiler) ncclProfilerStartProxyOpEvent();
-    }
-  }
-}
+```plaintext
+ncclProxyProgress() Event Emission Flow
+─────────────────────────────────────────────────────────────────────────────────
+ncclProxyProgress(proxyState) [Proxy Progress Thread Loop]
+        │
+        ├──► progressOps(proxyState, opStart=state->active, ...)
+        │    │
+        │    └──► while (op) {
+        │              op->progress(proxyState, op);
+        │              └──► [Transport-specific progress function]
+        │                   (net.cc, coll_net.cc, p2p.cc, shm.cc)
+        │                   ├──► Emits: ProxyStep events
+        │                   ├──► Emits: KernelCh events
+        │                   └──► Emits: Network plugin specific events
+        │              op = op->next;
+        │         }
+        │
+        ├──► [Thread Idle/Active State Transitions]
+        │    └──► Emits: ProxyCtrl events and event state changes
+        │
+        └──► ncclProxyGetPostedOps(proxyState)
+             ├──► [Thread Sleep/Wakeup State Transitions]
+             │      ├──► [Thread sleeps, waits for signal]
+             │      └──► Emits: ProxyCtrl events and event state changes
+             ├──► [Update Op pool] 
+             │
+             ├──► Emits: ProxyCtrl events and the Append event 
+             └──► ProxyAppend()
+                  │
+                  └──► ncclProxyOpToArgs()
+                       └──► Emits: ProxyOp events
 ```
 
-`op->progress()` progresses transport specific ops. this is just a function pointer type (similar to interfaces in OOP) defined at **/src/include/proxy.h**
+`op->progress()` progresses transport specific ops. this is just a function pointer type defined at **/src/include/proxy.h**
 
 ```c
 typedef ncclResult_t (*proxyProgressFunc_t)(struct ncclProxyState*, struct ncclProxyArgs*);
-proxy
 
 struct ncclProxyArgs {
   proxyProgressFunc_t progress;
-  
   struct ncclProxyArgs* next;
-
-/* other fields */
+  /* other fields */
 }
 ```
 (confusingly the variable is called `op`, although its type is `ncclProxyArgs` and NOT `ncclProxyOp`).
@@ -376,121 +355,68 @@ struct ncclProxyArgs {
 Which specific function this calls depends on the op. check the different ProxyProgress functions under 
 **/src/transport/net.cc**, **/src/transport/coll_net.cc**, **/src/transport/p2p.cc**, **/src/transport/shm.cc** and **/src/transport/shm.cc**.
 
-In these specific functions, calls to the profiler API are eventually made. These notify the profiler plugin about the following type of events
-- `ProxyStep`
-- `KernelCh`
-- Network plugin specific events
 
-===========
+The following paths eventually reach `ncclProxyPost()`, where Ops will be posted to a pool and proxy progress thread will be signalled. The thread reads from this pool when calling `ncclProxyGetPostedOps()`
 
-The following paths eventually reach `ncclProxyPost()` where Ops will be posted to a pool and proxy progress thread will be signalled. The thread reads from this pool when calling `ncclProxyGetPostedOps()`
-
-```c
-any of these NCCL API calls (
-ncclCommInitAll()  // init.cc
-ncclCommInitRankConfig()  // init.cc
-ncclCommInitRankScalable()  // init.cc
-ncclCommFinalize()  // init.cc
-ncclCommDestroy()  // init.cc
-ncclCommRevoke()  // init.cc
-ncclCommAbort()  // init.cc
-ncclCommSplit()  // init.cc
-ncclCommShrink()  // init.cc
-ncclCommGrow()  // init.cc
-ncclDevCommCreate()  // dev_runtime.cc
-ncclCommWindowRegister()  // dev_runtime.cc
-ncclGroupSimulateEnd()  // group.cc
-ncclGroupEnd()  // group.cc
-) {
-  ncclGroupEndInternal()
-}
-```
-
-```c
-any of these NCCL API calls (
-ncclAllGather() // collectives.cc
-ncclAlltoAll() // collectives.cc
-ncclAllReduce() // collectives.cc
-ncclBroadcast() // collectives.cc
-ncclGather() // collectives.cc
-ncclReduce() // collectives.cc
-ncclReduceScatter() // collectives.cc
-ncclScatter() // collectives.cc
-ncclSend() // collectives.cc
-ncclRecv() // collectives.cc
-) {
-  ncclEnqueueCheck() { // enqueue.cc
-    ncclGroupEndInternal()
-  }
-}
-```
-
-```c
-ncclGroupEndInternal() {
-  if (...) {
-    groupLaunchNonBlocking()
-      groupLaunch(&groupJob->base, NULL)
-  } else {
-    groupLaunch(&groupJob->base, internalSimInfoPtr)
-  }
-}
-```
-
-```c
-groupLaunch(&groupJob->base, internalSimInfoPtr) {
-  doLaunches(groupCommHeadMain[ncclGroupTaskTypeCollective])
-}
-```
-
-```c
-doLaunches(struct ncclComm* head) {
-  plan = comm->planner.unlaunchedPlansHead;
-  ncclLaunchKernelAfter_NoCuda(comm, plan) {
-    hostStreamPlanTask(comm, plan)
-  }
-
-  /* different code path */ 
-
-  ncclLaunchPrepare(comm) {
-    plan = ncclMemoryPoolAlloc<struct ncclKernelPlan>(...);
-    cudaLaunchHostFunc(hostStream, hostStreamPlanCallback, plan) {
-      hostStreamPlanCallback(void *plan_) {
-        hostStreamPlanTask(plan->comm, plan)
-      }
-    }
-  }
-}
-```
-    
-```c
-hostStreamPlanTask(comm, plan) {
-  uploadProxyOps(comm, plan) {
-    ncclProxySaveOp() {
-      SaveProxy() {
-        ncclLocalOpAppend() {
-          if (...) {
-            ncclProxyPost()
-          }
-        }
-      }
-    }
-  }
-  ncclProxyStart(comm) {
-    ncclProxyPost()
-  }
-}
-```
-
-```c
-ncclResult_t ncclProxyPost(struct ncclProxyOpsPool* pool, int nextOps, int nextOpsEnd) {
-  pthread_mutex_lock(&pool->mutex);
-  if (...) {
-    pool->nextOps = nextOps;
-    pthread_cond_signal(&pool->cond);
-  } 
-  pool->nextOpsEnd = nextOpsEnd;
-  pthread_mutex_unlock(&pool->mutex);
-}
+```plaintext
+Flow from NCCL API Calls to ncclProxyPost()
+─────────────────────────────────────────────────────────────────────────────────
+ncclCommInitAll()          ─┐    ncclAllGather()      ─┐      
+ncclCommInitRankConfig()    │    ncclAlltoAll()        │      
+ncclCommInitRankScalable()  │    ncclAllReduce()       │      
+ncclCommFinalize()          │    ncclBroadcast()       │      
+ncclCommDestroy()           │    ncclGather()          │      
+ncclCommRevoke()            │    ncclReduce()          │      
+ncclCommAbort()             │    ncclReduceScatter()   │      
+ncclCommSplit()             │    ncclScatter()         │      
+ncclCommShrink()            │    ncclSend()            │      
+ncclCommGrow()              │    ncclRecv()           ─┤      
+ncclDevCommCreate()         │                          │      
+ncclCommWindowRegister()    │                          ▼
+ncclGroupSimulateEnd()      │                   ncclEnqueueCheck()
+ncclGroupEnd()             ─┤                          │      
+                            ├──────────────────────────┘
+                            ▼
+                            ncclGroupEndInternal()
+                            ├───────────┐
+                            │           ▼
+                            │           groupLaunchNonBlocking()
+                            ├───────────┘
+                            ▼
+                            groupLaunch()
+                            │
+                            ▼
+                            doLaunches()
+                            ├───────────┐
+                            ▼           ▼
+        ncclLaunchKernelAfter_NoCuda()  ncclLaunchPrepare()
+                            │           │
+                            │           ▼
+                            │           cudaLaunchHostFunc()
+                            │           │
+                            │           ▼
+                            │           hostStreamPlanCallback()
+                            │           │
+                            ├───────────┘
+                            ▼
+                            hostStreamPlanTask()
+                            ├───────────┐
+                            ▼           ▼
+                uploadProxyOps()        ncclProxyStart()
+                            │           │
+                            ▼           │
+               ncclProxySaveOp()        │
+                            │           │
+                            ▼           │
+                     SaveProxy()        │
+                            │           │
+                            ▼           │
+             ncclLocalOpAppend()        │
+                            ├───────────┘
+                            ▼
+                            ncclProxyPost() (proxy.cc)
+                            ├──► [Posts Ops to pool]
+                            └──► [Signals Proxy Progress Thread]
 ```
 
 #### TODO include copyengine events (v2.29.1)?
