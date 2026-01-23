@@ -5,8 +5,8 @@
 
 #SBATCH --time=00:10:00
 
-#SBATCH -e err_profiler_07_cuda_graphs-%J
-#SBATCH -o out_profiler_07_cuda_graphs-%J
+#SBATCH -e /slurm-logs/err_profiler_07_cuda_graphs-%J
+#SBATCH -o /slurm-logs/out_profiler_07_cuda_graphs-%J
 
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -21,11 +21,11 @@ echo "loading modules..."
 module purge
 module load release/24.04 GCC/13.3.0 CUDA/12.6.0 OpenMPI/5.0.3
 
-export LD_LIBRARY_PATH=/data/cat/ws/s0949177-example_ws/nccl/build/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=/data/cat/ws/s0949177-nccl_profiler/nccl/build/lib:$LD_LIBRARY_PATH
 export NCCL_DEBUG=INFO
 
 # Paths - adjust these to match your environment
-NCCL_PATH="/data/cat/ws/s0949177-example_ws/nccl"
+NCCL_PATH="/data/cat/ws/s0949177-nccl_profiler/nccl"
 NCCLINSPECTOR_PLUGIN="${NCCL_PATH}/ext-profiler/inspector/libnccl-profiler-inspector.so"
 NCCLMINIMAL_PLUGIN="${NCCL_PATH}/ext-profiler/minimal-profiler/libnccl-profiler-minimal.so"
 NCCLEXAMPLE_PLUGIN="${NCCL_PATH}/ext-profiler/example/libnccl-profiler-example.so"
