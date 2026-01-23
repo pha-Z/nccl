@@ -5,8 +5,8 @@
 
 #SBATCH --time=00:10:00
 
-#SBATCH -e err_overhead_p2p-%J
-#SBATCH -o out_overhead_p2p-%J
+#SBATCH -e /slurm-logs/err_overhead_p2p-%J
+#SBATCH -o /slurm-logs/out_overhead_p2p-%J
 
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -27,10 +27,10 @@ echo "Loading modules..."
 module purge
 module load release/24.04 GCC/13.3.0 CUDA/12.6.0 OpenMPI/5.0.3
 
-export LD_LIBRARY_PATH=/data/cat/ws/s0949177-example_ws/nccl/build/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=/data/cat/ws/s0949177-nccl_profiler/nccl/build/lib:$LD_LIBRARY_PATH
 
 # Paths
-NCCL_PATH="/data/cat/ws/s0949177-example_ws/nccl"
+NCCL_PATH="/data/cat/ws/s0949177-nccl_profiler/nccl"
 EMPTY_PLUGIN="${NCCL_PATH}/ext-profiler/empty-profiler/libnccl-profiler-empty.so"
 EXE="${NCCL_PATH}/experiment/02_p2p_overhead/p2p_overhead"
 
