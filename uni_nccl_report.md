@@ -1,5 +1,39 @@
 # NCCL Profiler Plugin API - eine Machbarkeitsstudie
 
+TODO
+- Table of Contents
+  - 0. Abstract - gpu communication profiling/tracing motivieren
+  - 0. Introduction - vorausgesetztes Verständis soweit nötig für bestimmte Konzepte erwähnen oder erläutern (zb MPI, SLURM, NCCL)
+  - 1. Die Profiler API
+    - 1.1 Einbindung des Plugins in NCCL.
+      + first draft 
+      - TODO final draft
+    - 1.2 "rohe" API definition, kurz und knapp ohne viel erläuterung.
+      + first draft 
+      - TODO final draft
+    - 1.3 Der Codeflow: application NCCL API calls -> profiler API calls
+      - TODO first draft 
+      - TODO final draft
+    - 1.4 Der Codeflow++ genauere betrachtung in bestimmten situationen für verständis:
+      - ncclGroup, multi gpu streams, 
+      - multi threaded application
+      - in multi-node environment ansicht mit mehreren prozessen und profiler instances 
+  - 2. Was einem die Profiler Plugin API (nicht) ermöglicht
+    - Beispielhaft logging, running metrics, cupti, ...
+  - 3. Warum (nicht) die Profiler Plugin API in Erwähnung ziehen? 
+    - Experimente/Benchmarking auswerten
+    - Genauigkeit & consistency der timings der api calls diskutieren?
+    - Besondere Vor- & Nachteile hervorheben
+  - 4. Conclusion - Nützlichkeit für P-Score Messsystem
+
+- main content chunks/concepts to use through out the TOC to keep it all simple and chill:
+  - use simple code example walkthrough to illustrate what happens when 
+  - illustrate in swim lane diagrams
+    - the behavior of user API call -> nccl profiler init/finalize
+    - the behavior of user API call -> nccl profiler start/stop/recordEventState
+  - benchmarking, measurements
+  - conclusion
+
 ## Abstract
 - AI - big use case for HPC
 - Expensive workloads! Desire to understand and optimize application performance
@@ -15,6 +49,32 @@ TODO Mention
 - SLURM concepts
 as needed
 
+NCCL Concepts
+For understanding the behaviour of profiler it is helpful to first take a look what happens under the hood of NCCL when the application calls the NCCL API.
+
+a usual nccl application program flow follows this code structure
+
+```c
+// create nccl communicators
+ncclCommCreate();
+
+// allocate memory for computation and communication
+prepareDeviceForWork(); 
+
+// do computation and commmunication
+callNcclCollectives();
+// ...
+
+// finalize and clean up nccl communicators
+ncclCleanup();
+```
+
+During nccl communicator creation, nccl will internaly spawn a thread called ProxyProgress, which will handle network requests for GPU communication during collective and p2p operations. 
+
+Whenever then the application calls nccl collectives, nccl will decide on what network operations to do and add them to a pool. The ProxyProgress thread will read these operations from the pool and progress them by making operation specific functions calls.
+
+This behaviour is useful for understanding when network specific activity is profiled, which will be explained in section 1.3 TODO make this a link
+
 Through following sections the feasability of the NCCL profiler plugin API will be made clear:
 1. How does it work? 
 2. What can you do with it?
@@ -24,7 +84,10 @@ Through following sections the feasability of the NCCL profiler plugin API will 
 ### 1.1 How nccl detects the profiler plugin
 NCCL looks for a shared library which represents the profiler plugin, checking for the environment variable NCCL_PROFILER_PLUGIN: `profilerName = ncclGetEnv("NCCL_PROFILER_PLUGIN")`. 
 
-It then calls `dlopen(name, RTLD_NOW | RTLD_LOCAL)` to load the library immediately with local symbol visibility
+It then calls `handle* = dlopen(name, RTLD_NOW | RTLD_LOCAL)` 
+and `ncclProfiler_v5 = (ncclProfiler_v5_t*)dlsym(handle, "ncclProfiler_v5")`
+to load the library immediately with local symbol visibility
+
 
 "
 
@@ -41,24 +104,20 @@ The exact implementation details can be found at **/src/plugin/plugin_open.cc** 
 ### 1.2 The profiler API
 The plugin must implement a profiler API specified by NCCL, in the form of exposing a struct. This struct should contain pointers to all the functions required by the API
 ```c
-typedef struct {
+ncclProfiler_v5_t ncclProfiler_v5 = {
   const char* name;
   ncclResult_t (*init)(...);
   ncclResult_t (*startEvent)(...);
   ncclResult_t (*stopEvent)(...);
   ncclResult_t (*recordEventState)(...);
   ncclResult_t (*finalize)(...);
-} ncclProfiler_v5_t;
+};
 ```
-The struct type itself also indicates which API version is implemented.
+The plugin loading mechanism expects the struct variable name to follow this naming convention "ncclProfiler_v{versionNum}". As indicated this also describes which API version is implemented.
 The profiler API has changed multiple times with newer NCCL releases. New releases seem to have limited backwards compatibility with older plugins (TODO requires fact check. iirc there was some verison breaking feature that didnt allow backwards compatibilty to v2? but new nccl relreases certainly still feature the structs for older versions @/src/include/plugin/profiler).
 A plugin may expose multiple versioned structs to allow for backwards compatibility with older NCCL releases.
 
-"
-
-The NCCL code is instrumented with profiler callbacks at different levels to capture start/stop of groups, collective and point-to-point operations, as well as proxy, kernel and network activity
-
-" (quote from **/ext-profiler/README.md**)
+The NCCL code implements profiler callbacks at different levels to capture start/stop of groups, collective and point-to-point operations, as well as proxy, kernel and network activity
 
 As the API function names suggest, this will allow the profiler to track these activities as events.
 
@@ -68,9 +127,9 @@ The exact profiler API can be found under **/src/include/plugin/profiler/**. As 
 TODO the exact points where NCCL calls the API will be discussed in section #### 1.3 TODO make this a link
 ```c
 ncclResult_t init(
-  void** context,         // opaque profiler context object for separating profiler behavior across communicators
+  void** context,         // return value - opaque profiler context object for separating profiler behavior across communicators
   uint64_t commId,         // communicator id
-  int* eActivationMask,    // bitmask that sets which events are tracked the plugin
+  int* eActivationMask,    // return value - bitmask that sets which events are tracked the plugin
   const char* commName,    // user assigned communicator name
   int nNodes,              // number of nodes in communicator
   int nranks,              // number of ranks in communicator
@@ -95,17 +154,17 @@ As soon as NCCL finds the plugin and the correct ncclProfiler symbol, it calls i
 ```c
 ncclResult_t startEvent(
   void* context,                       // opaque profiler context object
-  void** eHandle,                      // event handle for event
+  void** eHandle,                      // return value - event handle for event
   ncclProfilerEventDescr_v5_t* eDescr  // pointer to ncclProfilerEventDescr_t object
 );
 ```
 The plugin developer should point `void** eHandle` to a custom event object. this pointer is then again passed as argument in the other API calls `stopEvent` and `recordEventState` to refer to the same event object. `void* context` passes the context object for this communicator in the profiler
 
-`ncclProfilerEventDescr_v5_t* eDescr` is a struct that contains all the information that nccl populates to describe the started event. Exact details can be found under the profiler API **/src/include/plugin/profiler/**. Notably, the event descriptor struct contains a field `void* parentObj`, which is the event handle to the parent event of this event (`null` if it has no parent). The different types of events follow an event hierarchy, with parent events preceding the child event.
+`ncclProfilerEventDescr_v5_t* eDescr` is a struct that contains all the information that nccl populates to describe the started event. Exact details can be found under the profiler API **/src/include/plugin/profiler/**. Notably, the event descriptor struct contains a field `void* parentObj`, which is the event handle to a parent event of this event (`null` if it has no parent). The different types of events can be thought of following an event depth level hierarchy, with parent events preceding the child events.
+
+NCCL core events are reported in multiple depth layers. All User API calls to Collective or P2P operations will trigger a Group API event, and when networking is required (in multi-node environments) ProxyCtrl Events may be emitted. Depending on the `eActivationMask` bitmask returned in the `init()` function, further events will be emitted in deeper sections of the nccl code base. It can be thought of as an event depth level hierarchy:
 
 "
-
-NCCL core events (reported above) are organized into a hierarchy as reported below:
 ```
 Group API event
    |
@@ -141,10 +200,12 @@ ProxyCtrl event
 
 As a consequence of the `eDescr` having the `parentObj` field, event types of parent events will also be tracked if the profiler enables tracking for event types of events that are children of those.
 
+TODO PROBLEM - following paragraph mention proxy thread before explaining nccl proxy thread concept
+ 
 Unless the user sets the environment variable `NCCL_PXN_DISABLE` to 0 (defaults to 1) to disable the PXN feature (PCI x NVLink - inter-node communication using a non-local NIC, using NVLink and an intermediate GPU), this causes some proxy operations to be processed in a remote proxy thread that differs from the one that generated the operation. When this happens, dereferencing the parent event, provided by NCCL in the event descriptor during `startEvent()`, is not possible and the event hierarchy reported above may not be utilized. The event descriptor for `ProxyOp` events includes the PID of the originator, which the profiler plugin can match against the local PID to check if the remote proxy thread is in the same address space of the proxy thread originating the operation to dereference the parent event. 
 
 Unfortunately, the ProxyOp' child event `ProxyStep` do not provide this field. However `startEvent()` also passes the `context` of the event, where a similar dynamic is present and it sometimes should not be dereferenced because the PXN feature. The profiler plugin may internally track which context objects have been created on this process over (potentially multiple thread-level) `init()` calls. If the passed `context` object during `startEvent()` is not present in the profilers tracked contexts, then this indicates that the event did not originate from this process because of the PXN feature. 
-TODO See #### 1.3 Where NCCL triggers profiler API callbacks for more information on when `init()` is called TODO make this a link
+See #### 1.3 Where NCCL triggers profiler API callbacks for more information on when `init()` is called TODO make this a link
 
 
 `stopEvent` tells the plugin that the event has stopped.
@@ -179,13 +240,11 @@ The name field should point to a character string with the name of the profiler 
 
 ### 1.3 Where nccl triggers profiler API callbacks
 
-Below, the callbacks to the profiler API will be explained. They can be categorized in following groups:
+Below, the callbacks to the profiler API will be explained. They can be categorized as follows:
 - callbacks for profiler initialization and finalization
-- callbacks to the profiler API for events directly related to the application calling the NCCL API (e.g. `ncclAllReduce()`)
-- callbacks to the profiler API for network events triggered by the proxy progress thread processing network requests
+- callbacks for events directly related to the application calling the NCCL API (e.g. `ncclAllReduce()`)
+- callbacks for network events triggered by the proxy progress thread processing network requests
 - TODO add copy engine based events section?
-
-- callbacks to the profiler API for events related to the application calling the NCCL API (e.g. `ncclAllReduce()`)
 
 #### Callbacks for profiler initialization and finalization
 
@@ -422,8 +481,8 @@ ncclGroupEnd()             ─┤                          │
 #### TODO include copyengine events (v2.29.1)?
 
 
-#### TODO section intro title?
-In a multi node HPC environment, a typical case for NCCL applications, besides the behaviour of NCCL making callbacks to the profiler, NCCL itself gets instantiated multiple times, which affects the total number of callbacks to the profiler. To better understand the profiling behaviour, the different settings below will each demonstrate the behaviour of callbacks to the profiler plugin.
+#### Callback perspective from viewpoint of multi-node cluster
+Besides application side NCCL API calls leading to profiler API calls, NCCL itself gets initialized multiple times when communicators are created. The setting of a multi-node environment influences the total number of callbacks to the profiler. To better understand the profiling behaviour, the different settings below will be explained
 
 TODO the next two subpoints below is one suggestion on how to think about different scenarios (number of nccl launches, profiler launches, per node, per thread...).
 not sure how much sense they make or if some other way of differentiation is better. work through the individual questions/points/todos within those subpoints and it will become clear what makes most sense!
@@ -435,11 +494,14 @@ TODO i think from nccl persepective it doesnt care - it just uses ncclUniqueId d
 ##### strategy using custom network socket code instead of MPI
 TODO
 
-#### callback behaviour under specific node configurations
+#### callback behaviour when setting specific node configurations
 n nodes, m gpus/per node and p tasks on m gpus allow many theoretical cases for node configurations by combination:
 - 1 node, n nodes
 - 1 gpu/node, m gpus/node
-- p tasks/node, where tasks/node < gpus/node, tasks/node = gpus/node, tasks/node > gpus/node
+- p tasks/node, where
+  - tasks/node < gpus/node, 
+  - tasks/node = gpus/node, 
+  - tasks/node > gpus/node
   
 TODO make this a table + add excalidraw pictograms?
 
@@ -497,9 +559,38 @@ Due to the asynchronous nature of NCCL operations, events associated to collecti
 Without both proxy and/or kernel activity it is impossible for the profiler to figure out when a collective operation completes. The profiler can leverage proxy and/or kernel event information, if these are enabled, to estimate when the collective ends.
 " (slightly reformulated section from **/ext-profiler/README.md**)
 
+### Logging
 
+- logging function from `init` TODO
+- code snippet custom logging infra, timestamping
+
+### Tracking & running metrics
+
+- code snippet showing where to CRUD custom context object
+- code snippet showing where to CRUD custom event object
+
+### Kernel tracing with CUPTI
+
+- cupti ext id mechanism briefly explained
+- code snippet where to init/cleanup cupti & use cupti mechanism
+- changing profiling behaviour during runtime TODO check example_profiler (and inspector?)
 
 ## 3. Why would you use it? pros & cons
+
+- customizable
+- might require maintenance / active development since NCCL is actively developed
+
+- overhead
+  - nvidia advertises their `inspector` implementation as efficient enough for "always-on" in production
+
+- NCCL_DEBUG env var https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html#nccl-debug 
+  - nccl already comes with debug logging which can be set to various levels of granularity
+  - INFO - Prints debug information
+  - TRACE - Prints replayable trace information on every call.
+  - v2.2.12 https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html#nccl-debug-file
+  - v2.3.4 https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html#nccl-debug-subsys
+  - v2.26 https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html#nccl-debug-timestamp-format
+  - v2.26 https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html#nccl-debug-timestamp-levels
 
 ## known limitations https://github.com/NVIDIA/nccl/tree/master/ext-profiler/README.md
 Kernel events instrumentation leverages counters exposed by the kernel to the host and the proxy progress thread. Thus, the proxy progress thread infrastructure is shared between the network and the profiler. If the proxy is serving network requests the kernel profiling probing can be delayed, causing loss of accuracy. Similarly, if the CPU is under heavy load and the scheduling of the proxy progress thread is delayed, a similar loss of accuracy can be encountered.
@@ -507,6 +598,16 @@ Kernel events instrumentation leverages counters exposed by the kernel to the ho
 To mitigate this effect, with version 4 of the profiler NCCL uses a per-channel ring buffer of 64 elements. Every counter is complemented by two timestamps (ptimers) supplied by the NCCL kernel (one for start and one for stop of the operation in the kernel). NCCL propagates these timestamps to the profiler plugin that it can convert them to CPU time domain.
 
 ## Comparison to MPI TODO ???
+MPI:
+- centered around cpu processes communicating
+- ranks/tasks per cpu process
+- rank = CPU process
+  
+NCCL:
+- centered around GPUs communicating. cpu processes/threads exist for communication orchestration
+- ranks/tasks possibly per cpu thread
+- ranks/tasks possibly assigned to 1 GPU (or many GPUs? TODO)
+- rank = GPU device
 
 # TODO
 link code snippets to source code files+lines
