@@ -5,8 +5,8 @@
 
 #SBATCH --time=00:5:00
 
-#SBATCH -e /slurm-logs/err_profiler_07_stress_test_2node_4gpu-%J
-#SBATCH -o /slurm-logs/out_profiler_07_stress_test_2node_4gpu-%J
+#SBATCH -e err_profiler_07_stress_test_2node_4gpu-%J
+#SBATCH -o out_profiler_07_stress_test_2node_4gpu-%J
 
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=4

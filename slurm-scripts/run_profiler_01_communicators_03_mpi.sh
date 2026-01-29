@@ -5,8 +5,8 @@
 
 #SBATCH --time=00:10:00
 
-#SBATCH -e /slurm-logs/err_profiler_01_communicators_mpi-%J
-#SBATCH -o /slurm-logs/out_profiler_01_communicators_mpi-%J
+#SBATCH -e err_profiler_01_communicators_mpi-%J
+#SBATCH -o out_profiler_01_communicators_mpi-%J
 
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=1

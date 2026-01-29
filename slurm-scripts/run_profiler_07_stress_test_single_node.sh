@@ -5,8 +5,8 @@
 
 #SBATCH --time=00:15:00
 
-#SBATCH -e /slurm-logs/err_profiler_07_stress_test_single_node-%J
-#SBATCH -o /slurm-logs/out_profiler_07_stress_test_single_node-%J
+#SBATCH -e err_profiler_07_stress_test_single_node-%J
+#SBATCH -o out_profiler_07_stress_test_single_node-%J
 
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=8

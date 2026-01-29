@@ -5,8 +5,8 @@
 
 #SBATCH --time=00:10:00
 
-#SBATCH -e /slurm-logs/err_profiler_07_interleaved-%J
-#SBATCH -o /slurm-logs/out_profiler_07_interleaved-%J
+#SBATCH -e err_profiler_07_interleaved-%J
+#SBATCH -o out_profiler_07_interleaved-%J
 
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1

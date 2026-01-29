@@ -5,8 +5,8 @@
 
 #SBATCH --time=00:4:00
 
-#SBATCH -e /slurm-logs/err_profiler_07_multi_task_per_gpu-%J
-#SBATCH -o /slurm-logs/out_profiler_07_multi_task_per_gpu-%J
+#SBATCH -e err_profiler_07_multi_task_per_gpu-%J
+#SBATCH -o out_profiler_07_multi_task_per_gpu-%J
 
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=4
