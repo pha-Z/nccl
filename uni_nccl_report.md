@@ -240,9 +240,15 @@ The name field should point to a character string with the name of the profiler 
 
 ### 1.3 Where nccl triggers profiler API callbacks
 
-Below, the callbacks to the profiler API will be explained. They can be categorized as follows:
+Below, the callbacks to the profiler API will be explained.
+Using the Hierarchy levels as explained above, they can be categorized as follows:
 - callbacks for profiler initialization and finalization
 - callbacks for events directly related to the application calling the NCCL API (e.g. `ncclAllReduce()`)
+  - ncclProfilerGroupApiEvent
+  - ncclProfilerCollApiEvent
+  - ncclProfilerP2pApiEvent
+  - ncclProfilerKernelLaunchEvent
+- callbacks for events
 - callbacks for network events triggered by the proxy progress thread processing network requests
 - TODO add copy engine based events section?
 
@@ -309,13 +315,82 @@ NCCL profile API events are generated when the API calls are made, right after N
 
 " (quote from from **/ext-profiler/README.md**)
 
-TODO: @cursor_nccl_profiling_event_flow.md
+
+```plaintext
+Flow from NCCL API Calls to nccl profiler events and ProxyPost
+─────────────────────────────────────────────────────────────────────────────────
+ncclCommInitAll()          ─┐    ncclAllGather()      ─┐      
+ncclCommInitRankConfig()   ─┤    ncclAlltoAll()       ─┤      
+ncclCommInitRankScalable() ─┤    ncclAllReduce()      ─┤      
+ncclCommFinalize()         ─┤    ncclBroadcast()      ─┤      
+ncclCommDestroy()          ─┤    ncclGather()         ─┤      
+ncclCommRevoke()           ─┤    ncclReduce()         ─┤      
+ncclCommAbort()            ─┤    ncclReduceScatter()  ─┤      
+ncclCommSplit()            ─┤    ncclScatter()        ─┤      
+ncclCommShrink()           ─┤    ncclSend()           ─┤      
+ncclCommGrow()             ─┤    ncclRecv()           ─┤      
+ncclDevCommCreate()        ─┤                          │      
+ncclCommWindowRegister()   ─┤                          ▼
+ncclGroupSimulateEnd()     ─┤                   ncclEnqueueCheck() 
+ncclGroupEnd()             ─┤                          │    └─>taskAppend()
+                            │                          │        ├─> collTaskAppend() ──> **Emits: GroupApi Event (start), CollApi Event ** 
+                            ├──────────────────────────┘        └─> p2pTaskAppend() ──> **Emits: GroupApi Event (start), P2pApi event**  
+                            ▼
+                            ncclGroupEndInternal() ────> **Emits: GroupApi Event (stop)** (at end of function call)
+                            ├───────────┐
+                            │           ▼
+                            │           groupLaunchNonBlocking()
+                            ├───────────┘
+                            ▼
+                            groupLaunch()
+                            │
+                            ▼
+                            doLaunches()
+                            └───┐
+                                ▼                      
+                            ┌───ncclLaunchPrepare()
+                            │   ncclLaunchKernel() ───────> **Emits: KernelLaunch Event**
+                            │   ncclLaunchKernelAfter_NoCuda()─┐
+                            │                                  │
+                            │                                  │
+                            ▼                                  │           
+                            cudaLaunchHostFunc()               │           
+                            │                                  │           
+                            ▼                                  │           
+                            hostStreamPlanCallback()           │           
+                            │                                  │           
+                            ├──────────────────────────────────┘
+                            ▼
+                            hostStreamPlanTask() ───> **Emits: Group Event, Coll Event, P2p Event**
+                            ├───────────┐
+                            ▼           ▼
+                    uploadProxyOps()    ncclProxyStart()
+                            │           │
+                            ▼           │
+                    ncclProxySaveOp()   │
+                            │           │
+                            ▼           │
+                    SaveProxy()         │
+                            │           │
+                            ▼           │
+                    ncclLocalOpAppend() │
+                            ├───────────┘
+                            ▼
+                            ncclProxyPost() (proxy.cc)
+                            ├──► [Posts Ops to pool]
+                            └──► [Signals Proxy Progress Thread]
+```
+
+
 
 #### proxy progress thread - callbacks when processing network requests
 
 TODO: @cursor_nccl_profiling_event_flow.md
 
 during nccl initialization, after calling `ncclProfilerPluginInit()`, `ncclProxyCreate(comm)` is called. This creates a new thread `ncclProxyService`. If needed this Proxy Service will launch another thread `ncclProxyProgress`. Proxy Progress is created only once by checking `!state->thread` which is a process wide shared resource.
+
+TODO correction to above paragraph:
+proxy threads are not "once per process" in the strict sense; they are once per shared-resource owner (once per distinct sharedRes that has a proxy). That can  mean one set per process in the "one root, split with share" case, but usually (and by default) means several sets per process when you have multiple roots or split/shrink without sharing (not shared by default).
 
 "
 
