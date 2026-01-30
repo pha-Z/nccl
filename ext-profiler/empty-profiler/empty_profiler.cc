@@ -8,10 +8,6 @@
 #include "nccl/err.h"
 #include "nccl/profiler.h"
 
-struct MyEvent {
-  char dummy;
-};
-
 struct MyContext {
   char dummy;
 };
@@ -23,12 +19,11 @@ ncclResult_t myInit(void** context, uint64_t commId, int* eActivationMask, const
 }
 
 ncclResult_t myStartEvent(void* context, void** eHandle, ncclProfilerEventDescr_v5_t* eDescr) {
-  *eHandle = malloc(sizeof(struct MyEvent));
+  *eHandle = NULL;
   return ncclSuccess;
 }
 
 ncclResult_t myStopEvent(void* eHandle) {
-  free(eHandle);
   return ncclSuccess;
 }
 
