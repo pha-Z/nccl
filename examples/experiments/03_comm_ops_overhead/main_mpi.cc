@@ -66,7 +66,7 @@ int getLocalRank(MPI_Comm comm) {
 }
 
 int main(int argc, char *argv[]) {
-  const int num_iterations = 100000;
+  const int num_iterations = 10000;
   const int warmup_iterations = 100;
 
   // Initialize MPI

@@ -66,7 +66,7 @@ int getLocalRank(MPI_Comm comm) {
 }
 
 int main(int argc, char *argv[]) {
-  const int num_iterations = 100000;
+  const int num_iterations = 1000000;
   const int warmup_iterations = 100;
   const size_t count = 4;  // Very small buffer to emphasize call overhead
 

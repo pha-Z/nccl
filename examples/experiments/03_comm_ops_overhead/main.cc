@@ -40,7 +40,7 @@ static inline uint64_t get_time_ns(void) {
 }
 
 int main(int argc, char *argv[]) {
-  const int num_iterations = 100000;
+  const int num_iterations = 10000;
   const int warmup_iterations = 100;
 
   int num_gpus = 0;
