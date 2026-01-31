@@ -50,9 +50,10 @@ TODO Mention
 as needed
 
 NCCL Concepts
+
 Before taking a closer look at the Profiler Plugin API it is helpful to first understand what happens internally to NCCL when an application calls the NCCL User API.
 
-a usual nccl application program flow follows this basic code structure
+a typical nccl application program follows this basic code structure
 
 ```c
 // create nccl communicators
@@ -71,14 +72,6 @@ cleanupNccl();
 
 During nccl communicator creation, NCCL will internaly spawn a thread called ProxyService. This thread will lazily start another thread called ProxyProgress, which will handle network requests for GPU communication during collective and p2p operations. 
 
-"
-
-```c
-  /* proxyState is shared among parent comm and split comms. comm->proxyState->thread is
-   * pthread_join()'d by commFree() in init.cc when the refCount reduces down to 0. */
-```
-
-" (quote from **/src/proxy.cc**) 
 
 ```plaintext
 Thread Creation Flow
@@ -124,7 +117,7 @@ ncclCommGrow()             ─┐     ┌─────────────
                                           └──► proxyServiceInitOp(...)
                                                └──► proxyProgressAsync(...)  (same path as above)
 ```
-ncclSharedResources
+
 The if guards `if (proxyState->refCount == 1)` and `if (!state->thread)` ensure that these threads are created once per a shared resource (struct `ncclSharedResources`). Below is a snippet of the relevant structs
 
 **/src/include/comm.h**
@@ -146,12 +139,21 @@ struct ncclProxyState {
 ```
 
 By default every nccl communicator has their own shared resource.
-In case the application calls `ncclCommSplit()` or `ncclCommShrink()`, where the original communicator was initialized using a `ncclConfig_t` struct with fields `splitShare` or `shrinkShare` set to 1, the newly created nccl communicator will instead share the shared Resource (and the proxy threads) with the originating parent communicator. 
+In case the application calls `ncclCommSplit()` or `ncclCommShrink()`, where the original communicator was initialized using a `ncclConfig_t` struct with fields `splitShare` or `shrinkShare` set to 1, the newly created nccl communicator will instead share the shared resource (and the proxy threads) with the originating parent communicator. 
+
+"
+
+```c
+  /* proxyState is shared among parent comm and split comms. comm->proxyState->thread is
+   * pthread_join()'d by commFree() in init.cc when the refCount reduces down to 0. */
+```
+
+" (quote from **/src/proxy.cc**) 
 
 
 Later, whenever the application calls the NCCL User API, NCCL internally will decide on what network operations to do and posts them to a pool. The ProxyProgress thread will read these operations from the pool and progress them.
 
-The following paths reach `ncclProxyPost()`, where Ops will be posted to a pool and proxy progress thread will be signalled. The progress thread reads from this pool when calling `ncclProxyGetPostedOps()`
+The following paths reach `ncclProxyPost()`, where Ops will be posted to a pool and proxy progress thread will be signalled.
 
 ```plaintext
 Flow from User API Calls to ncclProxyPost()
@@ -219,6 +221,7 @@ Internal Flow
                                       └──► [Signals Proxy Progress Thread]
 ```
 
+The progress thread reads from this pool when calling `ncclProxyGetPostedOps()` and progress them
 
 **/src/proxy.cc**
 ```plaintext
@@ -237,7 +240,7 @@ ncclProxyProgress(proxyState)
      } while (...)
 ```
 
-Understanding this behaviour is useful when taking look at the profiler plugin API for network related activity, explained in section 1.3 TODO make this a link
+Understanding this behaviour is useful when taking look at the profiler plugin API for network related activity, explained in the section.
 
 ## The Profiler API
 ### 1.1 How nccl detects the profiler plugin
@@ -292,8 +295,8 @@ ncclCommGrow()             ─┐     ┌─────────────
                                                                     └──► profiler->init()
 ```
 
-As seen the profiler is loaded just before the proxy thread creation.
-This plugin loading mechanism expects the struct variable name to follow this naming convention `ncclProfiler_v{versionNum}`, which also indicates which API version is implemented.
+As shown, when creating a communicator the profiler is loaded (before the proxy thread creation).
+The plugin loading mechanism expects the struct variable name to follow this naming convention `ncclProfiler_v{versionNum}`, which also indicates which API version is implemented.
 
 The profiler API has changed multiple times with newer NCCL releases. However, new releases seem to have limited backwards compatibility with older plugins (TODO requires fact check. iirc there was some verison breaking feature that didnt allow backwards compatibilty to v2? but current nccl relrease features the structs for older versions @/src/include/plugin/profiler and has a fallback mechanism to older api versions @/src/plugin/profiler.cc
 i think the problem is that with every new api version release, older profiler definitions under @/src/plugin/profiler/profiler_v{x}.cc files must be updated to handle/void/hide the new api version features. But looking at the commit history this doesnt seem to happen consistently. if they are not hidden or made backwards compatible, a plugin implemented against an old api version may be handed features from the new api version, which it does not how to handle (when faithfully implementing the old api)).
@@ -302,7 +305,7 @@ The exact implementation details for the loading mechanism can be found at **/sr
 
 ### 1.2 The profiler API
 The plugin must implement a profiler API specified by NCCL, in the form of exposing a struct. This struct should contain pointers to all the functions required by the API.
-A plugin may expose multiple versioned structs to allow for backwards compatibility with older NCCL releases.
+Given the plugin loading mechanism, a plugin may expose multiple versioned structs, allowing for backwards compatibility with older NCCL releases.
 
 ```c
 ncclProfiler_v5_t ncclProfiler_v5 = {
@@ -311,11 +314,12 @@ ncclProfiler_v5_t ncclProfiler_v5 = {
   ncclResult_t (*startEvent)(...);        // called at the start of several kinds of operations or activities
   ncclResult_t (*stopEvent)(...);         // called at the end of these operations or activites
   ncclResult_t (*recordEventState)(...);  // called to record the state of certain operations or activities
-  ncclResult_t (*finalize)(...);           //called before unloading the plugin
+  ncclResult_t (*finalize)(...);          // called before unloading the plugin
 };
 ```
 
-The full profiler API can be found under **/src/include/plugin/profiler/profiler_v{x}.cc**. As of NCCL release v2.29.1, five functions must be implemented.
+The full profiler API can be found under **/src/include/plugin/profiler/profiler_v{versionNum}.cc**. As of NCCL release v2.29.1, version 6 is the latest API version. Five functions must be implemented. 
+Internally NCCL wraps calls to the profiler API in custom functions. Inside the file **/src/include/profiler.h** they are forward declared and also nicely organized.
 
 The NCCL code internally implements callbacks to the profiler API at different levels to capture start/stop of groups, collective and point-to-point operations, as well as proxy, kernel and network activity.
 As the API function names suggest, this will allow the profiler to track these operations and activities as events.
@@ -467,9 +471,9 @@ Internal Flow
                                  ├──► Emits: Group Event, Coll Event, P2p Event
                                  ├──► uploadProxyOps() ─┐
                                  └──► ncclProxyStart()  ▼
-                                     │                 ...
-                                     ▼
-                                     ...
+                                      │                 ...
+                                      ▼
+                                      ...
 ```
 
 The ProxyProgress Thread is also emitting `startEvent`s (and `stopEvent`s) while progressing Ops:
@@ -528,15 +532,15 @@ Unfortunately, the ProxyOp child event `ProxyStep` does not provide this field. 
 
 #### stopEvent
 `stopEvent` tells the plugin that the event has stopped.
-TODO the exact points where NCCL calls the API will be discussed in section #### 1.3 TODO make this a link
 ```c
 ncclResult_t stopEvent(void* eHandle);  // handle to event object
 ```
+As of release v2.29.1 NCCL does not care about the return value of this function.
 
 `stopEvent` is called in the same functions that call `startEvent`, except for the groupApi event (see above diagram).
 
 #### recordEventState
-Some event types may be updated through calls to `recordEventState`, which can update the state, along with event attributes. These type of events can go through several states during their lifecycle. The list of supported states for the updatable events can be found under the profiler API **/src/include/plugin/profiler/**
+Some event types may be updated through calls to `recordEventState`, which can update the state, along with event attributes. These type of events can go through several states during their lifecycle. The list of supported states for the updatable events can be found under the profiler API **/src/include/plugin/profiler/profiler_v{versionNum}.h**
 ```c
 ncclResult_t recordEventState(
   void* eHandle,                               // handle to event object created through startEvent
@@ -544,10 +548,9 @@ ncclResult_t recordEventState(
   ncclProfilerEventStateArgs_v5_t* eStateArgs  // optional argument used to capture event attribute updates associated with the state transition
 );
 ```
+As of release v2.29.1 NCCL does not care about the return value of this function.
 
 Similarly, `recordEventState` is called in the same functions that call `startEvent`.
-
-Internally NCCL wraps calls to the profiler API in custom functions. Inside the file **/src/include/profiler.h** they are forward declared and also nicely organized.
 
 #### finalize
 When the profiler for a communicator is no longer needed, a call to `finalize()` is made and should destroy the profiler context and free up resources.
