@@ -235,6 +235,8 @@ INPUT c:/a/texlive/2025/texmf-dist/tex/generic/pgf/libraries/pgflibraryfadings.c
 OUTPUT uni_nccl_report.pdf
 INPUT c:/a/texlive/2025/texmf-dist/tex/latex/base/ifthen.sty
 INPUT c:/a/texlive/2025/texmf-dist/tex/latex/base/ifthen.sty
+INPUT c:/a/texlive/2025/texmf-dist/tex/generic/pgf/libraries/pgflibraryarrows.meta.code.tex
+INPUT c:/a/texlive/2025/texmf-dist/tex/generic/pgf/libraries/pgflibraryarrows.meta.code.tex
 INPUT c:/a/texlive/2025/texmf-dist/tex/latex/l3backend/l3backend-pdftex.def
 INPUT c:/a/texlive/2025/texmf-dist/tex/latex/l3backend/l3backend-pdftex.def
 INPUT ./uni_nccl_report.aux

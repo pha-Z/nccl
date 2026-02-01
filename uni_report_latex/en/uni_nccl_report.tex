@@ -13,6 +13,7 @@
 % Sequence diagrams
 \usepackage{tikz}
 \usepackage{pgf-umlsd}
+\usepgflibrary{arrows.meta}
 
 \lstset{
   basicstyle=\ttfamily\small,
@@ -137,7 +138,8 @@ cleanupNccl();
 \end{lstlisting}
 
 During NCCL communicator creation, NCCL internally spawns a thread called \texttt{ProxyService}. This thread lazily starts another thread called \texttt{ProxyProgress}, which handles network requests for GPU communication during collective and P2P operations.
-
+See Figure 1
+\iffalse
 \begin{lstlisting}[style=ascii]
 Thread Creation Flow
 -------------------------------------------------------------------------------
@@ -183,6 +185,46 @@ ncclCommGrow()             -+     +------------------------+
                                                 |
                                                 +---> proxyProgressAsync(...)  (same path as above)
 \end{lstlisting}
+\fi
+
+\iffalse
+\paragraph{What the diagram conveys.}
+The ASCII diagram shows how user API calls (e.g.\ \texttt{ncclCommInitRank}, \texttt{ncclCommSplit}) funnel into two internal entry points (\texttt{ncclCommInitRankDev} or \texttt{ncclCommInitChildComm}), then into \texttt{ncclCommInitRankFunc()}, \texttt{initTransportsRank()}, and \texttt{ncclProxyCreate(comm)}. From there, NCCL conditionally spawns the \texttt{ProxyService} thread; that thread later lazily starts the \texttt{ProxyProgress} thread via \texttt{proxyProgressAsync} $\to$ \texttt{ncclProxyProgressCreate} $\to$ \texttt{pthread\_create(ncclProxyProgress)}.
+
+\paragraph{Representation as a sequence diagram.}
+We model four participants: the \emph{User} (application), \emph{NCCL} (internal call chain), and the two spawned threads \emph{ProxyService} and \emph{ProxyProgress}. The User invokes NCCL; NCCL performs internal calls (self-calls) and then creates the ProxyService thread; ProxyService creates the ProxyProgress thread. This makes the creation order and the two-level thread spawn explicit.
+\fi
+
+\begin{figure}[htbp]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{sequencediagram}
+\newthread{user}{User}
+\newinst{nccl}{NCCL}
+\newinst{proxySvc}{ProxyService}
+\newinst{proxyProg}{ProxyProgress}
+\begin{call}{user}{ncclCommInitRank / ncclCommSplit / \ldots}{nccl}{}
+  \begin{callself}{nccl}{ncclCommInitRankDev / ncclCommInitChildComm}{}
+  \end{callself}
+  \begin{callself}{nccl}{ncclCommInitRankFunc()}{}
+  \end{callself}
+  \begin{callself}{nccl}{initTransportsRank()}{}
+  \end{callself}
+  \begin{callself}{nccl}{ncclProxyCreate(comm)}{}
+  \end{callself}
+  \begin{call}{nccl}{pthread\_create(ncclProxyService)}{proxySvc}{}
+    \begin{callself}{proxySvc}{proxyProgressAsync()}{}
+    \end{callself}
+    \begin{callself}{proxySvc}{ncclProxyProgressCreate()}{}
+    \end{callself}
+    \begin{call}{proxySvc}{pthread\_create(ncclProxyProgress)}{proxyProg}{}
+    \end{call}
+  \end{call}
+\end{call}
+\end{sequencediagram}%
+}
+\caption{Thread creation flow: User API $\to$ NCCL internal init $\to$ spawn ProxyService $\to$ spawn ProxyProgress.}
+\end{figure}
 
 The guards \texttt{if (proxyState->refCount == 1)} and \texttt{if (!state->thread)} ensure that these threads are created once per shared resource (struct \texttt{ncclSharedResources}). Snippets of the relevant structs:
 
@@ -213,7 +255,8 @@ By default every NCCL communicator has its own shared resource. When the applica
 (Quote from \textbf{/src/proxy.cc})
 
 Later, whenever the application calls the NCCL User API, NCCL internally decides what network operations to perform and posts them to a pool. The ProxyProgress thread reads these operations from the pool and progresses them. The following paths reach \texttt{ncclProxyPost()}, where ops are posted to the pool and the proxy progress thread is signalled.
-
+See Figure 2
+\iffalse
 \begin{lstlisting}[style=ascii]
 Flow from User API Calls to ncclProxyPost()
 -------------------------------------------------------------------------------
@@ -277,10 +320,49 @@ Internal Flow
                                     +-> [Posts Ops to pool]
                                     +-> [Signals Proxy Progress Thread]
 \end{lstlisting}
+\fi
+
+\iffalse
+\paragraph{What the diagram conveys.}
+Two families of user API calls lead to \texttt{ncclProxyPost()}: (1)~communicator lifecycle and group operations (\texttt{ncclCommInitAll}, \texttt{ncclCommSplit}, \texttt{ncclGroupSimulateEnd}, etc.) and (2)~collectives and P2P (\texttt{ncclAllReduce}, \texttt{ncclSend}, etc.). Both converge at \texttt{ncclGroupEndInternal()}, then \texttt{groupLaunch()} $\to$ \texttt{doLaunches()}. From there, kernel launch and host-callback paths lead to \texttt{hostStreamPlanTask()}, which calls \texttt{uploadProxyOps()} / \texttt{ncclProxyStart()} $\to$ \texttt{SaveProxy()} $\to$ \texttt{ncclProxyPost()}, where ops are posted to the pool and the ProxyProgress thread is signalled.
+
+\paragraph{Representation as a sequence diagram.}
+We show the \emph{User} invoking \emph{NCCL} with either a collective/P2P call or a comm/group call; NCCL's internal flow is collapsed into a chain of self-calls that merge at \texttt{ncclGroupEndInternal()} and end at \texttt{ncclProxyPost()}. The diagram emphasizes the single internal path after the merge and the role of \texttt{ncclProxyPost()} as the point where ops are posted and the proxy thread is woken.
+\fi
+
+\begin{figure}[htbp]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{sequencediagram}
+\newthread{user}{User}
+\newinst{nccl}{NCCL}
+\begin{call}{user}{User API (collective / comm / group)}{nccl}{}
+  \begin{callself}{nccl}{ncclEnqueueCheck() (or direct to group end)}{}
+  \end{callself}
+  \begin{callself}{nccl}{ncclGroupEndInternal()}{}
+    \begin{callself}{nccl}{groupLaunchNonBlocking()}{}
+    \end{callself}
+  \end{callself}
+  \begin{callself}{nccl}{groupLaunch() $\to$ doLaunches()}{}
+  \end{callself}
+  \begin{callself}{nccl}{ncclLaunchPrepare() / hostStreamPlanCallback()}{}
+  \end{callself}
+  \begin{callself}{nccl}{hostStreamPlanTask()}{}
+  \end{callself}
+  \begin{callself}{nccl}{uploadProxyOps() / ncclProxyStart()}{}
+  \end{callself}
+  \begin{callself}{nccl}{SaveProxy() $\to$ ncclProxyPost()}{}
+  \end{callself}
+\end{call}
+\end{sequencediagram}%
+}
+\caption{Flow from User API to \texttt{ncclProxyPost()}: two entry families merge at \texttt{ncclGroupEndInternal()}, then launch and proxy path to \texttt{ncclProxyPost()}.}
+\end{figure}
 
 The proxy progress thread reads from this pool when calling \texttt{ncclProxyGetPostedOps()} and progresses the ops.
+See Figure 3
 
-\textbf{/src/proxy.cc}
+\iffalse
 \begin{lstlisting}[style=ascii]
 -------------------------------------------------------------------------------
 ncclProxyProgress() progressing loop
@@ -300,6 +382,33 @@ ncclProxyProgress(proxyState)
             +-> [reads Ops or thread will wait]
     } while (...)
 \end{lstlisting}
+\fi
+
+\iffalse
+\paragraph{What the diagram conveys.}
+The ProxyProgress thread runs a loop: in each iteration it first calls \texttt{progressOps()}, which walks the list of ops and invokes \texttt{op->progress(proxyState, op)} for each; then it calls \texttt{ncclProxyGetPostedOps()}, which either reads newly posted ops from the pool or blocks until the main path signals it. The loop thus alternates between making progress on existing ops and acquiring new work.
+
+\paragraph{Representation as a sequence diagram.}
+We use a single participant (the ProxyProgress thread) and a loop block. Inside the loop we show two self-calls: \texttt{progressOps()} (with an inner loop over ops) and \texttt{ncclProxyGetPostedOps()}. This makes the recurring cycle and the two phases (progress vs.\ get posted ops) explicit.
+\fi
+
+\begin{figure}[htbp]
+\centering
+\resizebox{0.85\textwidth}{!}{%
+\begin{sequencediagram}
+\newthread{proxy}{ProxyProgress thread}
+\begin{sdblock}{loop: do \ldots while}{}
+  \begin{callself}{proxy}{progressOps(proxyState)}{}
+    \begin{callself}{proxy}{while (op) \{ op->progress(proxyState, op); op = op->next \}}{}
+    \end{callself}
+  \end{callself}
+  \begin{callself}{proxy}{ncclProxyGetPostedOps() [read ops or wait]}{}
+  \end{callself}
+\end{sdblock}
+\end{sequencediagram}%
+}
+\caption{\textbf{/src/proxy.cc} \texttt{ncclProxyProgress()} progressing loop: progress ops, then get posted ops (or wait). }
+\end{figure}
 
 Understanding this behaviour is useful for the Profiler Plugin API and network-related activity in the next section.
 
@@ -325,6 +434,8 @@ It then calls \texttt{handle* = dlopen(name, RTLD\_NOW | RTLD\_LOCAL)} and \text
 
 The flow from user API call to loading the profiler plugin:
 
+See Figure 4
+\iffalse
 \begin{lstlisting}[style=ascii]
 -------------------------------------------------------------------------------
 User API                          Internal Flow
@@ -357,6 +468,41 @@ ncclCommGrow()             --+    +------------------------+
                                                                    +-> profiler->init()
 
 \end{lstlisting}
+\fi
+
+\iffalse
+\paragraph{What the diagram conveys.}
+User API calls for communicator creation (\texttt{ncclCommInitRank}, \texttt{ncclCommSplit}, etc.) enter NCCL via \texttt{ncclCommInitRankDev()} or \texttt{ncclCommInitChildComm()}, then \texttt{ncclCommInitRankFunc()} $\to$ \texttt{initTransportsRank()}. There, \texttt{ncclProfilerPluginInit(comm)} runs in parallel with \texttt{ncclProxyCreate(comm)}. The profiler path calls \texttt{ncclProfilerPluginLoad()} (get env, \texttt{dlopen}, \texttt{dlsym} for \texttt{ncclProfiler\_v5}), then \texttt{profiler->init()}.
+
+\paragraph{Representation as a sequence diagram.}
+We show three participants: \emph{User}, \emph{NCCL}, and \emph{Profiler plugin}. The User invokes NCCL; NCCL performs internal init and then loads and initializes the plugin (load library, get symbol, call \texttt{init}). The diagram makes it clear that the plugin is loaded and \texttt{init()} is called during communicator creation, before proxy threads are created.
+\fi
+
+\begin{figure}[htbp]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{sequencediagram}
+\newthread{user}{User}
+\newinst{nccl}{NCCL}
+\newinst{plug}{Profiler plugin}
+\begin{call}{user}{ncclCommInitRank / ncclCommSplit / \ldots}{nccl}{}
+  \begin{callself}{nccl}{ncclCommInitRankDev / ncclCommInitChildComm}{}
+  \end{callself}
+  \begin{callself}{nccl}{ncclCommInitRankFunc()}{}
+  \end{callself}
+  \begin{callself}{nccl}{initTransportsRank()}{}
+  \end{callself}
+  \begin{callself}{nccl}{ncclProfilerPluginInit(comm)}{}
+    \begin{callself}{nccl}{ncclProfilerPluginLoad()}{}
+    \end{callself}
+    \begin{call}{nccl}{init(context, commId, \ldots)}{plug}{}
+    \end{call}
+  \end{callself}
+\end{call}
+\end{sequencediagram}%
+}
+\caption{User API $\to$ NCCL init $\to$ load profiler plugin and call \texttt{profiler->init()}.}
+\end{figure}
 
 The profiler plugin is loaded when creating a communicator (before proxy thread creation). The plugin loading mechanism expects the struct variable name to follow the naming convention \texttt{ncclProfiler\_v\{versionNum\}}, which also indicates the API version.
 
@@ -475,6 +621,9 @@ ProxyCtrl event
 If the profiler enables tracking for event types lower in the hierarchy, NCCL also tracks their parent event types. 
 
 The following diagrams show where NCCL emits \texttt{startEvent} and \texttt{stopEvent} 
+See Figure 5
+
+\iffalse
 \begin{lstlisting}[style=ascii]
 Flow from NCCL API Calls to profiler events
 ---------------------------------------------------------------------------------
@@ -537,11 +686,63 @@ Internal Flow
                                     v
                                     ...
 \end{lstlisting}
+\fi
+
+\iffalse
+\paragraph{What the diagram conveys.}
+The same two families of user API calls (comm/group vs.\ collectives/P2P) lead to profiler events. For collectives/P2P, \texttt{ncclEnqueueCheck()} $\to$ \texttt{taskAppend()} emits GroupApi (start) and CollApi or P2pApi (start). At \texttt{ncclGroupEndInternal()} NCCL emits GroupApi (stop). In \texttt{doLaunches()}, \texttt{ncclLaunchKernel()} emits KernelLaunch; \texttt{hostStreamPlanTask()} emits Group, Coll, P2p events; then \texttt{uploadProxyOps()} / \texttt{ncclProxyStart()} continue the path. The diagram shows where \texttt{startEvent} and \texttt{stopEvent} are invoked relative to the internal call flow.
+
+\paragraph{Representation as a sequence diagram.}
+We show \emph{User}, \emph{NCCL}, and \emph{Profiler plugin}. The User calls NCCL; NCCL performs internal steps and at specific points calls the plugin (\texttt{startEvent} / \texttt{stopEvent}). The sequence diagram makes the order of API calls and the injection points of profiler callbacks explicit.
+\fi
+
+\begin{figure}[htbp]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{sequencediagram}
+\newthread{user}{User}
+\newinst{nccl}{NCCL}
+\newinst{plug}{Profiler plugin}
+\begin{call}{user}{User API (collective / comm / group)}{nccl}{}
+  \begin{callself}{nccl}{ncclEnqueueCheck() $\to$ taskAppend()}{}
+    \begin{call}{nccl}{startEvent(GroupApi)}{plug}{}
+    \end{call}
+    \begin{call}{nccl}{startEvent/stopEvent(CollApi/P2pApi)}{plug}{}
+    \end{call}
+  \end{callself}
+  \begin{callself}{nccl}{ncclGroupEndInternal()}{}
+    
+    \begin{callself}{nccl}{groupLaunch() $\to$ doLaunches()}{}
+      \begin{callself}{nccl}{ncclLaunchKernel()}{}
+        \begin{call}{nccl}{startEvent/stopEvent(KernelLaunch)}{plug}{}
+        \end{call}
+      \end{callself}
+      \begin{callself}{nccl}{hostStreamPlanTask()}{}
+        \begin{call}{nccl}{startEvent(Group)}{plug}{}
+        \end{call}
+        \begin{call}{nccl}{startEvent/StopEvent(Coll, P2p) (can be many)}{plug}{}
+        \end{call}
+        \begin{call}{nccl}{stopEvent(Group)}{plug}{}
+        \end{call}
+      \end{callself}
+      \begin{call}{nccl}{stopEvent(GroupApi)}{plug}{}
+      \end{call}
+    \end{callself}
+    \begin{callself}{nccl}{uploadProxyOps() / ncclProxyStart()}{}
+    \end{callself}
+  \end{callself}
+\end{call}
+\end{sequencediagram}%
+}
+\caption{Flow from NCCL API calls to profiler events: where \texttt{startEvent} and \texttt{stopEvent} are emitted along the internal path.}
+\end{figure}
 
 Implementation: \textbf{/src/init.cc}, \textbf{/src/plugin/profiler.cc}.
 
 The ProxyProgress thread also emits \texttt{startEvent}/\texttt{stopEvent} while progressing ops.
+see Figure 6
 
+\iffalse
 \begin{lstlisting}[style=ascii]
 -------------------------------------------------------------------------------
 ncclProxyProgress() Event Emission Flow
@@ -578,7 +779,43 @@ ncclProxyProgress(proxyState) [Proxy Progress Thread Loop]
                      +-> Emits: ProxyOp events
     } while (...)
 \end{lstlisting}
+\fi
+\iffalse
+\paragraph{What the diagram conveys.}
+Inside the ProxyProgress thread loop, \texttt{progressOps()} invokes transport-specific progress (\texttt{op->progress}); those functions emit ProxyStep, KernelCh, and NetPlugin events. Thread idle/active and sleep/wakeup transitions emit ProxyCtrl events. When \texttt{ncclProxyGetPostedOps()} runs, it may emit ProxyCtrl events; \texttt{ProxyAppend()} / \texttt{ncclProxyOpToArgs()} emit ProxyOp events.
 
+\paragraph{Representation as a sequence diagram.}
+We use one participant (ProxyProgress thread) and a loop block. Inside the loop we show: \texttt{progressOps()} (with transport progress and event emission to the plugin), thread state transitions (ProxyCtrl), \texttt{ncclProxyGetPostedOps()} (ProxyCtrl), and \texttt{ProxyAppend()} (ProxyOp). The plugin is shown as a second participant that receives the emitted events.
+\fi
+
+\begin{figure}[htbp]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{sequencediagram}
+\newthread{proxy}{ProxyProgress thread}
+\newinst{plug}{Profiler plugin}
+\begin{sdblock}{loop: do \ldots while}{}
+  \begin{callself}{proxy}{progressOps(proxyState)}{}
+    \begin{callself}{proxy}{op->progress() [transport progress]}{}
+      \begin{call}{proxy}{startEvent/stopEvent(ProxyStep, KernelCh, NetPlugin)}{plug}{}
+      \end{call}
+    \end{callself}
+  \end{callself}
+  \begin{call}{proxy}{startEvent/stopEvent(ProxyCtrl) (idle/active, sleep/wake)}{plug}{}
+  \end{call}
+  \begin{callself}{proxy}{ncclProxyGetPostedOps()}{}
+    \begin{call}{proxy}{startEvent/StopEvent(ProxyCtrl)}{plug}{}
+    \end{call}
+  \end{callself}
+  \begin{callself}{proxy}{ProxyAppend() $\to$ ncclProxyOpToArgs()}{}
+    \begin{call}{proxy}{startEvent/stopEvent(ProxyOp)}{plug}{}
+    \end{call}
+  \end{callself}
+\end{sdblock}
+\end{sequencediagram}%
+}
+\caption{\texttt{ncclProxyProgress()} event emission: progress ops (emit ProxyStep/KernelCh/NetPlugin), state transitions (ProxyCtrl), get posted ops, ProxyAppend (ProxyOp).}
+\end{figure}
 
 \texttt{op->progress()} progresses transport specific ops. this is implemented as a function pointer type (defined in \textbf{/src/include/proxy.h}). Confusingly the variable is called `op`, although its type is \texttt{ncclProxyArgs} and NOT \texttt{ncclProxyOp}.
 
@@ -622,6 +859,9 @@ After a user API call to free resources associated with the communicator, \textt
 ncclResult_t finalize(void* context);
 \end{lstlisting}
 
+See Figure 7
+
+\iffalse
 \begin{lstlisting}[style=ascii]
 -------------------------------------------------------------------------------
 User API                          Internal Flow
@@ -634,6 +874,37 @@ ncclCommDestroy()  --+----------> commReclaim()
                                       +-> ncclProfiler->finalize()
                                       +-> ncclProfilerPluginUnload()
 \end{lstlisting}
+\fi
+
+\iffalse
+\paragraph{What the diagram conveys.}
+User API calls \texttt{ncclCommAbort()} or \texttt{ncclCommDestroy()} trigger \texttt{commReclaim()}, which calls \texttt{ncclProfilerPluginFinalize()} $\to$ \texttt{profiler->finalize()}, then \texttt{ncclProfilerPluginUnload()} (e.g.\ \texttt{dlclose}).
+
+\paragraph{Representation as a sequence diagram.}
+We show three participants: \emph{User}, \emph{NCCL}, and \emph{Profiler plugin}. The User calls NCCL to destroy/abort the communicator; NCCL runs \texttt{commReclaim()} and then calls the plugin's \texttt{finalize()} and unloads the plugin. The sequence diagram makes the teardown order explicit.
+\fi
+
+\begin{figure}[htbp]
+\centering
+\resizebox{0.75\textwidth}{!}{%
+\begin{sequencediagram}
+\newthread{user}{User}
+\newinst{nccl}{NCCL}
+\newinst{plug}{Profiler plugin}
+\begin{call}{user}{ncclCommAbort() / ncclCommDestroy()}{nccl}{}
+  \begin{callself}{nccl}{commReclaim()}{}
+  \end{callself}
+  \begin{callself}{nccl}{ncclProfilerPluginFinalize()}{}
+    \begin{call}{nccl}{finalize(context)}{plug}{}
+    \end{call}
+  \end{callself}
+  \begin{callself}{nccl}{ncclProfilerPluginUnload()}{}
+  \end{callself}
+\end{call}
+\end{sequencediagram}%
+}
+\caption{User API $\to$ \texttt{commReclaim()} $\to$ \texttt{finalize()} $\to$ plugin unload.}
+\end{figure}
 
 See implementation at \textbf{/src/init.cc}, \textbf{/src/plugin/profiler.cc}, \textbf{/src/plugin/plugin\_open.cc}.
 
@@ -650,7 +921,7 @@ TODO: Copy-engine-based events?
 
 \subsection{Code Examples}
 
-The following examples illustrate the profiling behavior.
+The following examples illustrate the profiling behavior under different environment settings and user application.
 
 \begin{itemize}
   \item single process multiple devices
@@ -679,12 +950,15 @@ Tracking \& running metrics
   
 
 void* parentObj
-if the plugin developer wants utilize this field, they should ensure that potential address reuse does not create ambiguity to what the parentObj was originally pointing to. Custom memory management is advised
-This field is useful when trying to understand which user API call triggered which events of lower level operations network activity.
+
+if the plugin developer wants utilize this field, they should ensure that potential address reuse does not create ambiguity to what the parentObj was originally pointing to. Custom memory management is advised.
+This field is useful when trying to understand which user API call triggered which events of lower level operations or activity such as network activity.
 
 TODO add picture
 
+
 seqNumber
+
 When profiling is enabled, NCCL counts the number of calls for each type of collective function per communicator.
 
 /src/include/comm.h
@@ -704,11 +978,13 @@ ncclResult_t ncclProfilerStartTaskEvents(struct ncclKernelPlan* plan) {
 }
 \end{lstlisting}
 
-This value is present in the eDescr for collective events and can be used to identify across processes which collectives operations belong together.
+This value is present in the eDescr for collective events and can be used to identify which collectives operations belong together across processes.
+
 TODO add picture of collectives seqNum
 
 
 PXN
+
 Unless Setting the environment variable \texttt{NCCL\_PXN\_DISABLE}=0 (default 1), due to PXN (PCIe x NVLink) some proxy ops may be progressed in a proxy thread from another process, different to the one that originally generated the operation 
 Then \texttt{parentObj} in \texttt{eDescr} is not safe to dereference; the \texttt{eDescr} for \texttt{ProxyOp} events includes the originator's PID, which the profiler can match against the local PID. 
 The \texttt{eDescr} for \texttt{ProxyStep} does not provide this field. However a workaround is possible:
@@ -716,24 +992,25 @@ The \texttt{eDescr} for \texttt{ProxyStep} does not provide this field. However 
 The passed \texttt{context} object in \texttt{startEvent()} is also unsafe to dereference due to PXN. the profiler plugin developer may internally track initialized contexts and whether the passed \texttt{context} belongs to the local process. This is also indicative of PXN.
 
 TODO: fact check if context is actually unsafe to deref? from code it looks like it is (context is read from pool - which iirc is posted to by potentially the originating process, not the progressing proxy thread process?)
-looking at inspector plugin implementation, it casts the passed context in startEvent(), but doesnt dereference it. so it doesnt crash
+looking at inspector plugin implementation, it casts the passed context in startEvent(), but doesnt dereference it. so it doesnt crash.
 looking at example plugin implementation, it dereferences it in startEvent(), which is why it crashes.
 
 TODO verify this behavior one more time: slurm 2695727
 
 TODO
 \begin{itemize}
-  \item Code snippet: CRUD of custom context object
-  \item Code snippet: CRUD of custom event object
+  \item Code snippet: example CRUD of custom context object
+  \item Code snippet: example CRUD of custom event object
 \end{itemize}
 
 TODO
 Kernel tracing with CUPTI
 \begin{itemize}
   \item CUPTI extension ID mechanism briefly explained
-  \item Code snippet: CUPTI init/cleanup and usage
-  \item Changing profiling behaviour at runtime (TODO: check example\_profiler, inspector)
+  \item Code snippet: where to CUPTI init/cleanup and usage
 \end{itemize}
+
+TODO Changing profiling behaviour at runtime (TODO: check example\_profiler, inspector)
 
 \subsection{Performance and scalability of the Profiler Plugin API}
  
@@ -748,7 +1025,7 @@ TODO
 TODO
 accuracy and reliability/consistency of the the timings of profiler api calls from nccl
 
-Using the profiler plugin when scaled to many gpus across multiple nodes is effortless as shown by the experiments
+Using the profiler plugin when scaled to many gpus across multiple nodes is effortless and did not require any changes for the ran examples and experiments.
 
 % ---------------------------------------------------------------------------
 \section{Potential Integration with Score-P}
@@ -799,8 +1076,7 @@ TODO
 % ---------------------------------------------------------------------------
 
 \begin{itemize}
-  \item code cleaning
-  \item Do PyTorch (+ JAX, TensorFlow) use this profiler plugin API?
+  \item custom profiler code cleaning
 \end{itemize}
 
 \end{document}
