@@ -51,7 +51,7 @@ as needed
 
 NCCL Concepts
 
-Before taking a closer look at the Profiler Plugin API it is helpful to first understand what happens internally to NCCL when an application calls the NCCL User API.
+Before taking a closer look at the Profiler Plugin API it is helpful to first understand what NCCL does internally when an application calls the NCCL User API.
 
 a typical nccl application program follows this basic code structure
 
@@ -153,7 +153,7 @@ In case the application calls `ncclCommSplit()` or `ncclCommShrink()`, where the
 
 Later, whenever the application calls the NCCL User API, NCCL internally will decide on what network operations to do and posts them to a pool. The ProxyProgress thread will read these operations from the pool and progress them.
 
-The following paths reach `ncclProxyPost()`, where Ops will be posted to a pool and proxy progress thread will be signalled.
+The following paths reach `ncclProxyPost()`, where Ops will be posted to a pool and the proxy progress thread will be signalled.
 
 ```plaintext
 Flow from User API Calls to ncclProxyPost()
@@ -221,7 +221,7 @@ Internal Flow
                                       └──► [Signals Proxy Progress Thread]
 ```
 
-The progress thread reads from this pool when calling `ncclProxyGetPostedOps()` and progress them
+The pproxy rogress thread reads from this pool when calling `ncclProxyGetPostedOps()` and progresses them.
 
 **/src/proxy.cc**
 ```plaintext
@@ -236,11 +236,11 @@ ncclProxyProgress(proxyState)
           │        }
           │   
           └──►ncclProxyGetPostedOps()
-              └──► [reads Ops or tread will wait]
+              └──► [reads Ops or thread will wait]
      } while (...)
 ```
 
-Understanding this behaviour is useful when taking look at the profiler plugin API for network related activity, explained in the section.
+Understanding this behaviour is useful when taking look at the profiler plugin API for network related activity, explained in the next section.
 
 ## The Profiler API
 ### 1.1 How nccl detects the profiler plugin
@@ -259,7 +259,7 @@ If no plugin was found (neither user defined nor default), do not enable profili
 
 " (quoted from docs: https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html#nccl-profiler-plugin)
 
-The following depicts the flow from user API call to loading the profiler plugin:
+The following depicts the flow from the user API call to loading the profiler plugin:
 
 ```plaintext
 User API                          Internal Flow
@@ -283,27 +283,25 @@ ncclCommGrow()             ─┐     ┌─────────────
                                        ...                          │
                                                                     ▼
                                                                     ncclProfilerPluginInit(comm)
-                                                                    │
-                                                                    ▼
                                                                     ├──► ncclProfilerPluginLoad()
                                                                     │    ├──► ncclGetEnv("NCCL_PROFILER_PLUGIN")
                                                                     │    ├──► ncclOpenProfilerPluginLib()
                                                                     │    │    └──► dlopen(name, RTLD_NOW | RTLD_LOCAL)
                                                                     │    ├──► getNcclProfiler_v5()
                                                                     │    │    └──► (ncclProfiler_v5_t*)dlsym(lib, "ncclProfiler_v5");
-                                                                    │    └──► [try fallback to prior api version]
+                                                                    │    └──► [try fallback to older api version]
                                                                     └──► profiler->init()
 ```
 
-As shown, when creating a communicator the profiler is loaded (before the proxy thread creation).
-The plugin loading mechanism expects the struct variable name to follow this naming convention `ncclProfiler_v{versionNum}`, which also indicates which API version is implemented.
+As shown, the profiler is loaded when creating a communicator (this happens before the proxy thread creation).
+The plugin loading mechanism expects the struct variable name to follow the naming convention `ncclProfiler_v{versionNum}`, which also indicates which API version is implemented.
 
 The profiler API has changed multiple times with newer NCCL releases. However, new releases seem to have limited backwards compatibility with older plugins (TODO requires fact check. iirc there was some verison breaking feature that didnt allow backwards compatibilty to v2? but current nccl relrease features the structs for older versions @/src/include/plugin/profiler and has a fallback mechanism to older api versions @/src/plugin/profiler.cc
 i think the problem is that with every new api version release, older profiler definitions under @/src/plugin/profiler/profiler_v{x}.cc files must be updated to handle/void/hide the new api version features. But looking at the commit history this doesnt seem to happen consistently. if they are not hidden or made backwards compatible, a plugin implemented against an old api version may be handed features from the new api version, which it does not how to handle (when faithfully implementing the old api)).
 
 The exact implementation details for the loading mechanism can be found at **/src/plugin/plugin_open.cc** and **/src/plugin/profiler.cc**
 
-### 1.2 The profiler API
+### 1.2 The profiler API definition
 The plugin must implement a profiler API specified by NCCL, in the form of exposing a struct. This struct should contain pointers to all the functions required by the API.
 Given the plugin loading mechanism, a plugin may expose multiple versioned structs, allowing for backwards compatibility with older NCCL releases.
 
@@ -324,7 +322,7 @@ Internally NCCL wraps calls to the profiler API in custom functions. Inside the 
 The NCCL code internally implements callbacks to the profiler API at different levels to capture start/stop of groups, collective and point-to-point operations, as well as proxy, kernel and network activity.
 As the API function names suggest, this will allow the profiler to track these operations and activities as events.
 
-Below the functions will be explained and where NCCL triggers these callbacks:
+Below the API functions will be explained and where NCCL triggers callbacks to them:
 
 #### init
 `init` initializes the profiler plugin. NCCL passes various arguments: 
@@ -340,21 +338,21 @@ ncclResult_t init(
   ncclDebugLogger_t logfn  // logger function
 );
 ```
-If the init function does not return ncclSuccess, NCCL disables the plugin.
-
-Notably, `void** context` is an opaque handle that the plugin developer may point to any custom context object. This pointer is then again passed as argument in the other API calls `startEvent` and `finalize`. This context object is separate across communicators.
-
-the plugin developer should point `int* eActivationMask` to a bitmask, which tells nccl which type of events that the profiler plugin wants to track. Each bit corresponds to a different event type. The mappings can be found at **/src/include/plugin/nccl_profiler.h**. internally this bitmask is initialized with `0`, which means no events will be tracked by default. Setting it to `4095` will track all events.
-
-TODO what to do with `ncclDebugLogger_t logfn` ?
-
 the `init()` function is called immediately upon successful plugin load in `ncclProfilerPluginLoad()`, which is also depicted in the diagram above. It is worth mentioning that this is called everytime a communicator is created (unlike the proxy threads).
+
+If the init function does not return `ncclSuccess`, NCCL disables the plugin.
 
 "
 
 As soon as NCCL finds the plugin and the correct ncclProfiler symbol, it calls its init function. This allows the plugin to initialize its internal context, used during profiling of NCCL events. 
 
 " (quote from **/ext-profiler/README.md**)
+
+Notably, `void** context` is an opaque handle that the plugin developer may point to any custom context object. This pointer is then again passed as argument in the other API calls `startEvent` and `finalize`. This context object is separate across communicators.
+
+the plugin developer should point `int* eActivationMask` to a bitmask, which tells NCCL which type of events that the profiler plugin wants to track. Each bit corresponds to a different event type. The mappings can be found at **/src/include/plugin/nccl_profiler.h**. internally this bitmask is initialized with `0`, which means no events will be tracked by default. Setting it to `4095` will track all events.
+
+TODO what to do with `ncclDebugLogger_t logfn` ?
 
 #### startEvent
 `startEvent` is called when NCCL begins certain operations. NCCL passes various arguments:
@@ -407,10 +405,9 @@ ProxyCtrl event
 ```
 " (quote from **/ext-profiler/README.md**)
 
-As a consequence of the `parentObj` field in the `eDescr`, if the profiler enables tracking for event types lower in the hierarchy, their parent event types will also always be tracked, allowing to set a meaningful `eHandle` for the `parentObj` field in the passed `eDescr`.
+If the profiler enables tracking for event types lower in the hierarchy, NCCL will also track their parent event types. This also allows for meaningful `eHandle`s as values for the `parentObj` field inside the `eDescr`.
 
-
-Some of the above diagrams been altered, now showing where NCCL emits `startEvent`s (and `stopEvent`s):
+The below diagrams shows where NCCL emits `startEvent`s and `stopEvent`s. 
 
 ```plaintext
 Flow from NCCL API Calls to profiler events
@@ -477,38 +474,38 @@ Internal Flow
 ```
 The implementation can be found at **/src/init.cc** and **/src/plugin/profiler.cc**.
 
-The ProxyProgress Thread is also emitting `startEvent`s (and `stopEvent`s) while progressing Ops:
+The ProxyProgress Thread is also emitting `startEvent`s and `stopEvent`s while progressing Ops:
 
 ```plaintext
 ncclProxyProgress() Event Emission Flow
 ─────────────────────────────────────────────────────────────────────────────────
 ncclProxyProgress(proxyState) [Proxy Progress Thread Loop]
-        │
-        ├──► progressOps(proxyState, opStart=state->active, ...)
-        │    │
-        │    └──► while (op) {
-        │              op->progress(proxyState, op);
-        │              └──► [Transport-specific progress function]
-        │                   (net.cc, coll_net.cc, p2p.cc, shm.cc)
-        │                   ├──► Emits: ProxyStep events
-        │                   ├──► Emits: KernelCh events
-        │                   └──► Emits: Network plugin specific events
-        │              op = op->next;
-        │         }
-        │
-        ├──► [Thread Idle/Active State Transitions]
-        │    └──► Emits: ProxyCtrl events
-        │
-        └──► ncclProxyGetPostedOps(proxyState)
-             ├──► [Thread Sleep/Wakeup State Transitions]
-             │      ├──► [Thread sleeps, waits for signal]
-             │      └──► Emits: ProxyCtrl events
-             ├──► [Update Op pool] 
-             │
-             ├──► Emits: ProxyCtrl events
-             └──► ProxyAppend()
-                  └──► ncclProxyOpToArgs()
-                       └──► Emits: ProxyOp events
+└──► do {
+          ├──► progressOps(proxyState, opStart=state->active, ...)
+          │    │
+          │    └──► while (op) {
+          │              op->progress(proxyState, op);
+          │              └──► [Transport-specific progress function]
+          │                   (net.cc, coll_net.cc, p2p.cc, shm.cc)
+          │                   ├──► Emits: ProxyStep events
+          │                   ├──► Emits: KernelCh events
+          │                   └──► Emits: Network plugin specific events
+          │              op = op->next;
+          │         }
+          │
+          ├──► [Thread Idle/Active State Transitions]
+          │    └──► Emits: ProxyCtrl events
+          │
+          └──► ncclProxyGetPostedOps(proxyState)
+               ├──► [Thread Sleep/Wakeup State Transitions]
+               │      ├──► [Thread sleeps, waits for signal]
+               │      └──► Emits: ProxyCtrl events
+               ├──► [Update Op pool] 
+               ├──► Emits: ProxyCtrl events
+               └──► ProxyAppend()
+                    └──► ncclProxyOpToArgs()
+                         └──► Emits: ProxyOp events
+     } while (...)
 ```
 
 `op->progress()` progresses transport specific ops. this is just a function pointer type defined at **/src/include/proxy.h** (confusingly the variable is called `op`, although its type is `ncclProxyArgs` and NOT `ncclProxyOp`).
@@ -538,10 +535,10 @@ ncclResult_t stopEvent(void* eHandle);  // handle to event object
 ```
 As of release v2.29.1 NCCL does not care about the return value of this function.
 
-`stopEvent` is called in the same functions that call `startEvent`, except for the groupApi event (see above diagram).
+`stopEvent` is called in the same functions that call `startEvent`, except for the GroupApi Event (see above diagram).
 
 #### recordEventState
-Some event types may be updated through calls to `recordEventState`, which can update the state, along with event attributes. These type of events can go through several states during their lifecycle. The list of supported states for the updatable events can be found under the profiler API **/src/include/plugin/profiler/profiler_v{versionNum}.h**
+Some event types may be updated by NCCL through calls to `recordEventState`, which can update the state, along with event attributes. These type of events can go through several states during their lifecycle. The list of supported states for the updatable events can be found under the profiler API **/src/include/plugin/profiler/profiler_v{versionNum}.h**
 ```c
 ncclResult_t recordEventState(
   void* eHandle,                               // handle to event object created through startEvent
@@ -551,10 +548,10 @@ ncclResult_t recordEventState(
 ```
 As of release v2.29.1 NCCL does not care about the return value of this function.
 
-Similarly, `recordEventState` is called in the same functions that call `startEvent`.
+`recordEventState` is called in the same functions that call `startEvent`.
 
 #### finalize
-After a user API call is made to free resources associated with the communicator object the profiler API's `finalize()` function is called in `ncclProfilerPluginFinalize()`. Afterwards the profiler is also unloaded by eventually calling `dlclose(handle)` in `ncclProfilerPluginUnload()`.
+After a user API call is made to free resources associated with the communicator object the profiler API's `finalize()` function is called in `ncclProfilerPluginFinalize()`. Afterwards the profiler is also unloaded by eventually calling `dlclose(handle)` inside `ncclProfilerPluginUnload()`.
 ```c
 ncclResult_t finalize(void* context);  // opaque profiler context object
 ```

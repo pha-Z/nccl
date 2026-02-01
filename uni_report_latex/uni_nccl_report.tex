@@ -1,0 +1,549 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[ngerman]{babel}
+\usepackage{amsmath}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{graphicx}
+
+% Sequence diagrams
+\usepackage{tikz}
+\usepackage{pgf-umlsd}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  columns=fullflexible,
+  breaklines=true,
+  frame=single,
+  framerule=0.3pt,
+  rulecolor=\color{black!30},
+  keywordstyle=\color{blue!70!black},
+  commentstyle=\color{black!60},
+  stringstyle=\color{red!60!black}
+}
+
+% For ASCII/plaintext diagrams
+\lstdefinestyle{ascii}{
+  basicstyle=\ttfamily\footnotesize,
+  columns=fixed,
+  breaklines=true,
+  frame=single,
+  framerule=0.3pt
+}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.75\baselineskip}
+
+\title{NCCL Profiler Plugin API -- eine Machbarkeitsstudie}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+
+% ---------------------------------------------------------------------------
+\section{TODO / Struktur (aus Markdown)}
+% ---------------------------------------------------------------------------
+
+\subsection{Table of Contents}
+\begin{itemize}
+  \item 0. Abstract -- GPU communication profiling/tracing motivieren
+  \item 0. Introduction -- vorausgesetztes Verst\"andnis soweit n\"otig (z.\,B. MPI, SLURM, NCCL)
+  \item 1. Die Profiler API
+  \begin{itemize}
+    \item 1.1 Einbindung des Plugins in NCCL. (first draft; TODO final draft)
+    \item 1.2 ``rohe'' API-Definition, kurz und knapp
+    \item 1.3 Der Codeflow: Application NCCL User API $\to$ Profiler API
+    \item 1.4 Codeflow++: ncclGroup, multi GPU streams, multi-threaded, multi-node
+  \end{itemize}
+  \item 2. Was einem die Profiler Plugin API (nicht) erm\"oglicht (Logging, running metrics, CUPTI, \ldots)
+  \item 3. Warum (nicht) die Profiler Plugin API in Erw\"agung ziehen? (Experimente, Genauigkeit, Vor-/Nachteile)
+  \item 4. Conclusion -- N\"utzlichkeit f\"ur P-Score-Messsystem
+\end{itemize}
+
+\subsection{Main content chunks / concepts}
+\begin{itemize}
+  \item Einfache Code-Beispiel-Walkthroughs
+  \item Swim-Lane-Diagramme (User API $\to$ init/finalize; start/stop/recordEventState)
+  \item Benchmarking, Messungen
+  \item Conclusion
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{Abstract}
+% ---------------------------------------------------------------------------
+
+\begin{itemize}
+  \item AI -- großer Use Case f\"ur HPC
+  \item Teure Workloads; Wunsch, Anwendungsperformance zu verstehen und zu optimieren
+  \item Großer Teil von AI-Workloads ist GPU-Kommunikation (oft \"uber viele GPUs)
+  \item NCCL -- die Bibliothek, die Kommunikationsroutinen f\"ur NVIDIA-GPUs implementiert
+  \item Bietet eine Schnittstelle, einen eigenen Profiler in NCCL einzubinden und Performancedaten zu extrahieren
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{Introduction}
+% ---------------------------------------------------------------------------
+
+TODO: nach Bedarf erw\"ahnen -- MPI-Konzepte, NCCL-Konzepte, SLURM-Konzepte.
+
+\subsection{NCCL Concepts}
+
+Bevor die Profiler Plugin API genauer betrachtet wird, ist es hilfreich zu verstehen, was NCCL intern tut, wenn eine Anwendung die NCCL User API aufruft.
+
+Eine typische NCCL-Anwendung folgt dieser Grundstruktur:
+
+\begin{lstlisting}[language=C]
+// create nccl communicators
+createNcclComm();
+
+// allocate memory for computation and communication
+prepareDeviceForWork();
+
+// do computation and communication
+callNcclCollectives();
+// ...
+
+// finalize and clean up nccl communicators
+cleanupNccl();
+\end{lstlisting}
+
+Bei der Erstellung von NCCL-Communicators startet NCCL intern einen Thread namens \texttt{ProxyService}. Dieser startet verz\"ogert einen weiteren Thread \texttt{ProxyProgress}, der Netzwerkanfragen f\"ur GPU-Kommunikation bei Collective- und P2P-Operationen bearbeitet.
+
+\begin{lstlisting}[style=ascii]
+Thread Creation Flow
+-------------------------------------------------------------------------------
+User API                          Internal Flow
+-------------------------------------------------------------------------------
+ncclCommInitRank()         -+
+ncclCommInitAll()           |
+ncclCommInitRankConfig()    +---> ncclCommInitRankDev()  --+
+ncclCommInitRankScalable() -+                              |
+ncclCommSplit()            -+                              |
+ncclCommShrink()            +---> ncclCommInitChildComm() -+
+ncclCommGrow()             -+     +------------------------+
+                            |     v
+                            +---> ncclCommInitRankFunc()
+                                  |
+                                  v
+                                  initTransportsRank()
+                                  |
+                                  +-> ncclProxyCreate(comm)
+                                      |
+                                      v
+                                      if (proxyState->refCount == 1)
+                                          pthread_create(&comm->proxyState->thread, NULL, ncclProxyService, ...)
+                                          |
+                                          v
+                                          [New Thread] ncclProxyService()
+                                          |
+                                          +---> proxyProgressAsync(...)
+                                          |    |
+                                          |    +---> proxyConnInit(...)
+                                          |         |
+                                          |         +---> proxyProgressInit(proxyState)
+                                          |              |
+                                          |              +---> ncclProxyProgressCreate(proxyState)
+                                          |                   |
+                                          |                   +---> if (!state->thread)
+                                          |                          pthread_create(&state->thread, NULL, ncclProxyProgress, proxyState)
+                                          |                          |
+                                          |                          v
+                                          |                          [New Thread] ncclProxyProgress()
+                                          |
+                                          +---> proxyServiceInitOp(...)
+                                               +---> proxyProgressAsync(...)  (same path as above)
+\end{lstlisting}
+
+Die Bedingungen \texttt{if (proxyState->refCount == 1)} und \texttt{if (!state->thread)} stellen sicher, dass diese Threads nur einmal pro geteilter Ressource (struct \texttt{ncclSharedResources}) erzeugt werden. Ausschnitte der relevanten Structs:
+
+\textbf{/src/include/comm.h}
+\begin{lstlisting}[language=C]
+struct ncclSharedResources {
+  struct ncclComm* owner; /* communicator which creates this shared res. */
+  struct ncclProxyState* proxyState;
+  // other fields
+}
+\end{lstlisting}
+
+\textbf{/src/include/proxy.h}
+\begin{lstlisting}[language=C]
+struct ncclProxyState {
+  int refCount;
+  pthread_t thread;
+  // other fields
+}
+\end{lstlisting}
+
+Standardm\"aßig hat jeder NCCL-Communicator seine eigene Shared Resource. Ruft die Anwendung \texttt{ncclCommSplit()} oder \texttt{ncclCommShrink()} auf, wobei der urspr\"ungliche Communicator mit einem \texttt{ncclConfig\_t} mit \texttt{splitShare} bzw.\ \texttt{shrinkShare} = 1 initialisiert wurde, teilt sich der neue Communicator die Shared Resource (und die Proxy-Threads) mit dem Eltern-Communicator.
+
+\begin{quote}
+\texttt{/* proxyState is shared among parent comm and split comms.}\\
+\texttt{comm->proxyState->thread is pthread\_join()'d by commFree() in init.cc when the refCount reduces down to 0. */}
+\end{quote}
+(Zitat aus \textbf{/src/proxy.cc})
+
+Sp\"ater entscheidet NCCL bei jedem Aufruf der NCCL User API intern \"uber die Netzwerkoperationen und h\"angt sie an einen Pool. Der ProxyProgress-Thread liest diese Operationen aus dem Pool und f\"uhrt sie aus. Die folgenden Pfade f\"uhren zu \texttt{ncclProxyPost()}, wo Ops in einen Pool geschrieben und der Proxy-Progress-Thread signalisiert wird.
+
+\begin{lstlisting}[style=ascii]
+Flow from User API Calls to ncclProxyPost()
+-------------------------------------------------------------------------------
+User API
+---------------------------------------------------------------------------------
+ncclCommInitAll()          -+    ncclAllGather()      -+
+ncclCommInitRankConfig()    |    ncclAlltoAll()        |
+ncclCommInitRankScalable()  |    ncclAllReduce()       |
+ncclCommFinalize()          |    ncclBroadcast()       |
+ncclCommDestroy()           |    ncclGather()         |
+ncclCommRevoke()            |    ncclReduce()          |
+ncclCommAbort()             |    ncclReduceScatter()   |
+ncclCommSplit()             |    ncclScatter()         |
+ncclCommShrink()            |    ncclSend()            |
+ncclCommGrow()              |    ncclRecv()            -+
+ncclDevCommCreate()         |                          |
+ncclCommWindowRegister()    |                          |
+ncclGroupSimulateEnd()     -+                          |
+                            |                          |
+Internal Flow               |                          v
+                            |                   ncclEnqueueCheck()
+                            +--------------------------+
+                            v
+                            ncclGroupEndInternal()
+                            +----+
+                            |    v
+                            |    groupLaunchNonBlocking()
+                            +----+
+                            v
+                            groupLaunch() -> doLaunches()
+                            +--> ncclLaunchPrepare() -> ...
+                            +--> ncclProxyStart() -> ncclProxySaveOp() -> ...
+                            v
+                            ncclProxyPost() (proxy.cc)
+                            +--> [Posts Ops to pool]
+                            +--> [Signals Proxy Progress Thread]
+\end{lstlisting}
+
+Der Proxy-Progress-Thread liest aus diesem Pool bei \texttt{ncclProxyGetPostedOps()} und f\"uhrt die Ops aus.
+
+\textbf{/src/proxy.cc}
+\begin{lstlisting}[style=ascii]
+ncclProxyProgress() progressing loop
+-------------------------------------------------------------------------------
+ncclProxyProgress(proxyState)
++---> do {
+          +---> progressOps(proxyState, ...)
+          |   +---> while (op) {
+          |             op->progress(proxyState, op);
+          |             op = op->next;
+          |        }
+          +---> ncclProxyGetPostedOps()
+               +---> [reads Ops or thread will wait]
+     } while (...)
+\end{lstlisting}
+
+Dieses Verhalten zu verstehen ist n\"utzlich f\"ur die Profiler Plugin API und netzwerkbezogene Aktivit\"at im n\"achsten Abschnitt.
+
+% ---------------------------------------------------------------------------
+\section{The Profiler API}
+% ---------------------------------------------------------------------------
+
+\subsection{How nccl detects the profiler plugin (1.1)}
+
+Bei der Erstellung eines NCCL-Communicators sucht NCCL nach einer Shared Library, die das Profiler-Plugin repr\"asentiert, und pr\"uft die Umgebungsvariable \texttt{NCCL\_PROFILER\_PLUGIN}: \texttt{profilerName = ncclGetEnv("NCCL\_PROFILER\_PLUGIN")}.
+
+Dann werden \texttt{handle* = dlopen(name, RTLD\_NOW | RTLD\_LOCAL)} und \texttt{ncclProfiler\_v5 = (ncclProfiler\_v5\_t*)dlsym(handle, "ncclProfiler\_v5")} aufgerufen, um die Library sofort mit lokaler Symbol-Sichtbarkeit zu laden.
+
+\begin{quote}
+\begin{itemize}
+  \item Wenn \texttt{NCCL\_PROFILER\_PLUGIN} gesetzt ist: Lade die Library mit dem angegebenen Namen; schl\"agt das fehl, versuche \texttt{libnccl-profiler-<NCCL\_PROFILER\_PLUGIN>.so}.
+  \item Wenn \texttt{NCCL\_PROFILER\_PLUGIN} nicht gesetzt ist: versuche \texttt{libnccl-profiler.so}.
+  \item Wurde kein Plugin gefunden: Profiling ist deaktiviert.
+  \item Wenn \texttt{NCCL\_PROFILER\_PLUGIN} auf \texttt{STATIC\_PLUGIN} gesetzt ist, werden die Plugin-Symbole in der Programmbinary gesucht.
+\end{itemize}
+\end{quote}
+(Quelle: \url{https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html#nccl-profiler-plugin})
+
+Der Ablauf vom User-API-Aufruf bis zum Laden des Profiler-Plugins:
+
+\begin{lstlisting}[style=ascii]
+User API                          Internal Flow
+-------------------------------------------------------------------------------
+ncclCommInitRank()         -+
+ncclCommInitAll()           |
+ncclCommInitRankConfig()    +---> ncclCommInitRankDev()  --+
+ncclCommInitRankScalable() -+                              |
+ncclCommSplit()            -+                              |
+...                         +---> ncclCommInitChildComm() -+
+                            |     v
+                            +---> ncclCommInitRankFunc()
+                                  v
+                                  initTransportsRank()
+                                  +---> ncclProfilerPluginInit(comm) -+
+                                  +---> ncclProxyCreate(comm)          |
+                                       |                              v
+                                       |                              ncclProfilerPluginLoad()
+                                       |                              +---> ncclGetEnv("NCCL_PROFILER_PLUGIN")
+                                       |                              +---> dlopen(...), getNcclProfiler_v5()
+                                       |                              +---> profiler->init()
+\end{lstlisting}
+
+Das Profiler-Plugin wird beim Erstellen eines Communicators geladen (vor der Proxy-Thread-Erstellung). Der Plugin-Lademechanismus erwartet, dass der Struct-Variablenname der Konvention \texttt{ncclProfiler\_v\{versionNum\}} folgt; damit ist auch die API-Version angegeben.
+
+Die Profiler-API hat sich mit neueren NCCL-Releases mehrfach ge\"andert; die Abw\"artskompatibilit\"at zu \"alteren Plugins scheint begrenzt (TODO: Faktencheck). Die genaue Implementierung steht in \textbf{/src/plugin/plugin\_open.cc} und \textbf{/src/plugin/profiler.cc}.
+
+\subsection{The profiler API definition (1.2)}
+
+Das Plugin muss eine von NCCL spezifizierte Profiler-API implementieren, indem es einen Struct exportiert. Dieser Struct enth\"alt Zeiger auf alle vom API geforderten Funktionen. Ein Plugin kann mehrere versionierte Structs exportieren (Abw\"artskompatibilit\"at).
+
+\begin{lstlisting}[language=C]
+ncclProfiler_v5_t ncclProfiler_v5 = {
+  const char* name;
+  ncclResult_t (*init)(...);              // NCCL calls this right after loading
+  ncclResult_t (*startEvent)(...);        // at start of operations/activities
+  ncclResult_t (*stopEvent)(...);         // at end of these operations/activities
+  ncclResult_t (*recordEventState)(...);  // to record state of certain operations
+  ncclResult_t (*finalize)(...);          // before unloading the plugin
+};
+\end{lstlisting}
+
+Die vollst\"andige API liegt unter \textbf{/src/include/plugin/profiler/profiler\_v\{versionNum\}.cc}. Ab NCCL v2.29.1 ist Version 6 die neueste; f\"unf Funktionen m\"ussen implementiert werden. Intern kapselt NCCL Aufrufe in eigene Funktionen (u.\,a. in \textbf{/src/include/profiler.h}).
+
+NCCL ruft die Profiler-API auf verschiedenen Ebenen auf, um Start/Ende von Groups, Collectives, P2P, Proxy-, Kernel- und Netzwerkaktivit\"at zu erfassen. Im Folgenden werden die API-Funktionen und die Stellen, an denen NCCL sie aufruft, erl\"autert.
+
+\subsubsection{init}
+
+\texttt{init} initialisiert das Profiler-Plugin. NCCL \"ubergibt u.\,a.:
+
+\begin{lstlisting}[language=C]
+ncclResult_t init(
+  void** context,          // out param - opaque profiler context
+  uint64_t commId,         // communicator id
+  int* eActivationMask,    // out param - bitmask for which events are tracked
+  const char* commName,    // user assigned communicator name
+  int nNodes,              // number of nodes in communicator
+  int nranks,              // number of ranks in communicator
+  int rank,                // rank identifier in communicator
+  ncclDebugLogger_t logfn  // logger function
+);
+\end{lstlisting}
+
+\texttt{init()} wird unmittelbar nach erfolgreichem Plugin-Load in \texttt{ncclProfilerPluginLoad()} aufgerufen (siehe Diagramm oben) -- und bei jeder Communicator-Erstellung (anders als die Proxy-Threads). Gibt \texttt{init} nicht \texttt{ncclSuccess} zur\"uck, deaktiviert NCCL das Plugin.
+
+\begin{quote}
+Sobald NCCL das Plugin und das richtige ncclProfiler-Symbol findet, ruft es die init-Funktion auf. So kann das Plugin seinen internen Kontext f\"ur die Profilierung von NCCL-Events initialisieren.
+\end{quote}
+(Quelle: \textbf{/ext-profiler/README.md})
+
+\texttt{void** context} ist ein opaker Handle, auf den der Plugin-Entwickler ein beliebiges Kontextobjekt zeigen kann; dieser Zeiger wird bei \texttt{startEvent} und \texttt{finalize} wieder \"ubergeben. Das Kontextobjekt ist pro Communicator getrennt.
+
+Der Plugin-Entwickler soll \texttt{int* eActivationMask} auf eine Bitmaske setzen, die angibt, welche Event-Typen getrackt werden. Die Zuordnung steht in \textbf{/src/include/plugin/nccl\_profiler.h}; intern ist die Maske standardm\"aßig 0 (keine Events). 4095 = alle Events.
+
+TODO: Verwendung von \texttt{ncclDebugLogger\_t logfn}?
+
+\subsubsection{startEvent}
+
+\texttt{startEvent} wird aufgerufen, wenn NCCL bestimmte Operationen beginnt:
+
+\begin{lstlisting}[language=C]
+ncclResult_t startEvent(
+  void* context,                       // opaque profiler context object
+  void** eHandle,                      // out param - event handle
+  ncclProfilerEventDescr_v5_t* eDescr  // pointer to event descriptor
+);
+\end{lstlisting}
+
+Ab Release v2.29.1 ignoriert NCCL den R\"uckgabewert. \texttt{void** eHandle} kann auf ein benutzerdefiniertes Event-Objekt zeigen; dieser Zeiger wird bei \texttt{stopEvent} und \texttt{recordEventState} wieder \"ubergeben. \texttt{eDescr} beschreibt das gestartete Event; Details in \textbf{/src/include/plugin/profiler/}. Das Feld \texttt{void* parentObj} im Event-Deskriptor ist der \texttt{eHandle} eines Parent-Events (oder null).
+
+Alle User-API-Aufrufe zu Collectives oder P2P starten ein Group-API-Event; bei Netzwerkbedarf (multi-node) k\"onnen ProxyCtrl-Events emittiert werden. Je nach \texttt{eActivationMask} werden weitere (Kind-)Events in tieferen Codebereichen emittiert -- eine Event-Hierarchie mit mehreren Tiefen:
+
+\begin{quote}
+\begin{lstlisting}[style=ascii]
+Group API event
+   +- Collective API event
+   |     +- Collective event
+   |     |     +- ProxyOp event -> ProxyStep event -> NetPlugin event
+   |     |     +- KernelCh event
+   +- Point-to-point API event
+   |     +- Point-to-point event
+   |     |     +- ProxyOp event -> ProxyStep event -> NetPlugin event
+   |     |     +- KernelCh event
+   +- Kernel Launch event
+ProxyCtrl event
+\end{lstlisting}
+\end{quote}
+(Quelle: \textbf{/ext-profiler/README.md})
+
+Wenn das Profiler-Plugin Tracking f\"ur Event-Typen weiter unten in der Hierarchie aktiviert, trackt NCCL auch die Parent-Typen. Die folgenden Diagramme zeigen, wo NCCL \texttt{startEvent} und \texttt{stopEvent} emittiert (siehe Markdown/Quellcode f\"ur vollst\"andige ASCII-Diagramme). Implementierung: \textbf{/src/init.cc}, \textbf{/src/plugin/profiler.cc}.
+
+Der ProxyProgress-Thread emittiert ebenfalls \texttt{startEvent}/\texttt{stopEvent} beim Fortschreiten der Ops (z.\,B. ProxyStep, KernelCh, NetPlugin-Events). Die transport-spezifischen Progress-Funktionen stehen in \textbf{/src/transport/net.cc}, \textbf{coll\_net.cc}, \textbf{p2p.cc}, \textbf{shm.cc}.
+
+Ohne \texttt{NCCL\_PXN\_DISABLE}=0 (Standard 1) kann wegen PXN (PCIe x NVLink) ein Teil der Proxy-Ops in einem Proxy-Thread eines anderen Prozesses laufen. Dann ist \texttt{parentObj} im \texttt{eDescr} nicht sicher dereferenzierbar; das \texttt{eDescr} f\"ur ProxyOp-Events enth\"alt die PID des Ursprungs, die der Profiler mit der lokalen PID vergleichen kann. ProxyStep liefert dieses Feld nicht; der Profiler kann \"uber getrackte Kontexte pr\"ufen, ob der \"ubergebene \texttt{context} zum lokalen Prozess geh\"ort.
+
+\subsubsection{stopEvent}
+
+\texttt{stopEvent} teilt dem Plugin mit, dass das Event beendet ist.
+\begin{lstlisting}[language=C]
+ncclResult_t stopEvent(void* eHandle);  // handle to event object
+\end{lstlisting}
+NCCL ignoriert den R\"uckgabewert. \texttt{stopEvent} wird in denselben Funktionen wie \texttt{startEvent} aufgerufen (außer beim GroupApi-Event, siehe Diagramm).
+
+\subsubsection{recordEventState}
+
+Einige Event-Typen k\"onnen durch \texttt{recordEventState} aktualisiert werden (Zustand und Attribute). Unterst\"utzte Zust\"ande: \textbf{/src/include/plugin/profiler/profiler\_v\{versionNum\}.h}.
+\begin{lstlisting}[language=C]
+ncclResult_t recordEventState(
+  void* eHandle,
+  ncclProfilerEventState_v5_t eState,
+  ncclProfilerEventStateArgs_v5_t* eStateArgs
+);
+\end{lstlisting}
+Aufruf an denselben Stellen wie \texttt{startEvent}.
+
+\subsubsection{finalize}
+
+Nach einem User-API-Aufruf zum Freigeben der Communicator-Ressourcen wird \texttt{finalize()} in \texttt{ncclProfilerPluginFinalize()} aufgerufen; danach wird das Plugin per \texttt{dlclose(handle)} in \texttt{ncclProfilerPluginUnload()} entladen.
+\begin{lstlisting}[language=C]
+ncclResult_t finalize(void* context);
+\end{lstlisting}
+
+\begin{lstlisting}[style=ascii]
+User API                          Internal Flow
+ncclCommAbort()    -+
+ncclCommDestroy()  +-------------> commReclaim()
+                                  +---> ncclProfilerPluginFinalize()
+                                        +---> ncclProfiler->finalize()
+                                        +---> ncclProfilerPluginUnload()
+\end{lstlisting}
+
+Details: \textbf{/src/init.cc}, \textbf{/src/plugin/profiler.cc}, \textbf{/src/plugin/plugin\_open.cc}.
+
+\subsubsection{name}
+
+Der Profiler-Plugin-Struct hat zus\"atzlich ein Feld \texttt{name}.
+
+\begin{quote}
+Das Feld \texttt{name} soll auf eine Zeichenkette mit dem Namen des Profiler-Plugins zeigen. Es wird f\"ur alle Log-Ausgaben verwendet, besonders bei \texttt{NCCL\_DEBUG=INFO}.
+\end{quote}
+(Quelle: \textbf{/ext-profiler/README.md})
+
+TODO: Copy-Engine-basierte Events?
+
+\subsection{Callback perspective from viewpoint of multi-node cluster}
+
+Neben den durch NCCL-API-Aufrufe ausgel\"osten Profiler-API-Aufrufen wird NCCL bei jeder Communicator-Erstellung mehrfach initialisiert. Die Multi-Node-Umgebung beeinflusst die Gesamtzahl der Callbacks. Verschiedene Szenarien (Initialisierungsstrategien, Knotenkonfigurationen) werden im Markdown detailliert beschrieben; hier eine kompakte \"Ubersicht.
+
+\subsubsection{Callback-Verhalten bei verschiedenen Communicator-Initialisierungsstrategien}
+
+TODO: Verhalten bei \texttt{one\_device\_per\_process\_mpi} vs.\ \texttt{one\_device\_per\_thread}; aus NCCL-Sicht: Identifikation \"uber \texttt{ncclUniqueId} bis auf Thread-Ebene.
+
+\begin{itemize}
+  \item Strategie \texttt{one\_device\_per\_process\_mpi}
+  \item Strategie \texttt{one\_device\_per\_thread}
+  \item Strategie mit eigenem Netzwerk-Socket-Code statt MPI
+\end{itemize}
+
+\subsubsection{Callback-Verhalten bei spezifischen Knotenkonfigurationen}
+
+Konfigurationen: $n$ Knoten, $m$ GPUs/Knoten, $p$ Tasks auf $m$ GPUs:
+\begin{itemize}
+  \item tasks/node $<$ gpus/node (verschiedene Unterf\"alle; z.\,B. 1 Task/node $\Rightarrow$ \"ahnlich \texttt{one\_device\_per\_thread}; $n$ tasks/node kann zu Crashes bei Collectives f\"uhren)
+  \item tasks/node = gpus/node $\Rightarrow$ Verhalten wie \texttt{one\_device\_per\_process\_mpi}
+  \item tasks/node $>$ gpus/node (kann bei Communicator-Init crashen; TODO)
+\end{itemize}
+
+(Vollst\"andige Aufz\"ahlung und TODOs siehe \textbf{uni\_nccl\_report.md}.)
+
+% ---------------------------------------------------------------------------
+\section{What can you do with it}
+% ---------------------------------------------------------------------------
+
+\begin{quote}
+Aufgrund der asynchronen Natur von NCCL-Operationen sind Events zu Collectives und P2P nicht pr\"azise abgrenzbar. \texttt{stopEvent} bei Collectives bedeutet nur, dass das Collective enqueued wurde. Ohne Proxy- und/oder Kernel-Aktivit\"at kann das Plugin nicht feststellen, wann ein Collective endet. Mit aktivierten Proxy-/Kernel-Events kann das Plugin das Ende sch\"atzen.
+\end{quote}
+(leicht umformuliert nach \textbf{/ext-profiler/README.md})
+
+\subsection{Logging}
+\begin{itemize}
+  \item Logging-Funktion aus \texttt{init} (TODO)
+  \item Code-Snippet: eigene Logging-Infrastruktur, Timestamping
+\end{itemize}
+
+\subsection{Tracking \& running metrics}
+\begin{itemize}
+  \item Code-Snippet: CRUD des benutzerdefinierten Kontextobjekts
+  \item Code-Snippet: CRUD des benutzerdefinierten Event-Objekts
+\end{itemize}
+
+\subsection{Kernel tracing with CUPTI}
+\begin{itemize}
+  \item CUPTI-Ext.-ID-Mechanismus kurz erl\"autern
+  \item Code-Snippet: CUPTI init/cleanup und Nutzung
+  \item Ver\"anderung des Profiling-Verhaltens zur Laufzeit (TODO: example\_profiler, Inspector pr\"ufen)
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{Why would you use it? pros \& cons}
+% ---------------------------------------------------------------------------
+
+\begin{itemize}
+  \item Anpassbar (customizable)
+  \item Kann Wartung / aktive Weiterentwicklung erfordern, da NCCL aktiv weiterentwickelt wird
+  \item Overhead: NVIDIA wirbt damit, dass ihre \texttt{inspector}-Implementierung effizient genug f\"ur ``always-on'' in Produktion sei
+\end{itemize}
+
+\subsection{NCCL\_DEBUG}
+
+\url{https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html#nccl-debug}
+
+NCCL bringt bereits Debug-Logging mit verschiedenen Granularit\"atsstufen mit:
+\begin{itemize}
+  \item INFO -- Debug-Informationen
+  \item TRACE -- Replay-f\"ahige Trace-Informationen bei jedem Aufruf
+  \item Weitere Optionen (v2.2.12 \texttt{NCCL\_DEBUG\_FILE}, v2.3.4 \texttt{NCCL\_DEBUG\_SUBSYS}, v2.26 Timestamp-Format/Levels)
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{Known limitations}
+% ---------------------------------------------------------------------------
+
+Quelle: \url{https://github.com/NVIDIA/nccl/tree/master/ext-profiler/README.md}
+
+Die Instrumentierung von Kernel-Events nutzt Z\"ahler, die der Kernel an den Host und den Proxy-Progress-Thread liefert. Die Proxy-Progress-Thread-Infrastruktur wird also von Netzwerk und Profiler geteilt. Wenn der Proxy Netzwerkanfragen bedient, kann das Auslesen der Kernel-Profiling-Daten verz\"ogert werden (Genauigkeitsverlust). Ebenso bei starker CPU-Last und verz\"ogerter Planung des Proxy-Progress-Threads.
+
+Ab Profiler-Version 4 verwendet NCCL einen Ringpuffer von 64 Elementen pro Kanal. Jeder Z\"ahler wird durch zwei vom NCCL-Kernel gelieferte Timestamps (ptimers) erg\"anzt (Start/Ende der Operation im Kernel). NCCL \"ubergibt diese Timestamps an das Profiler-Plugin, damit es sie in die CPU-Zeitdom\"ane umrechnen kann.
+
+% ---------------------------------------------------------------------------
+\section{Comparison to MPI (TODO)}
+% ---------------------------------------------------------------------------
+
+\subsection{MPI}
+\begin{itemize}
+  \item Zentriert um CPU-Prozesse, die kommunizieren
+  \item Ranks/Tasks pro CPU-Prozess
+  \item Rank = CPU-Prozess
+\end{itemize}
+
+\subsection{NCCL}
+\begin{itemize}
+  \item Zentriert um GPUs, die kommunizieren; CPU-Prozesse/Threads orchestrieren
+  \item Ranks/Tasks m\"oglicherweise pro CPU-Thread
+  \item Ranks/Tasks ggf.\ einer GPU (oder vielen GPUs? TODO) zugeordnet
+  \item Rank = GPU-Device
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{TODO}
+% ---------------------------------------------------------------------------
+
+\begin{itemize}
+  \item Code-Snippets mit Quellcode-Dateien und Zeilennummern verlinken
+  \item Nutzen PyTorch (+ JAX, TensorFlow) die Profiler-Plugin-API?
+\end{itemize}
+
+\end{document}
