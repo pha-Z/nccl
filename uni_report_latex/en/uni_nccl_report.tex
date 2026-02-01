@@ -930,7 +930,7 @@ The following examples illustrate the profiling behavior under different environ
   \item behavior when utilizing ncclGroup for collective operations
 \end{itemize}
 
-TODO add exampless (profiler that just does logging + application examples)
+TODO add exampless and pictures (profiler that just does logging + application examples)
 
 \subsection{What is possible with the Profiler Plugin API? Considerations and Pitfalls for (logging, running metrics, CUPTI, \ldots) when writing the plugin - section title WIP }
 
@@ -1021,6 +1021,63 @@ TODO
   \item synthetic performance measuring applications
   \item real application
 \end{itemize}
+
+
+TODO check out potential use of
+
+\begin{lstlisting}[language=C]
+@profiler (line 120 - 182)
+#define ENABLE_TIMER 0
+#include "timer.h"
+
+#if ENABLE_TIMER
+// These counters are used to measure profiler overheads for different part of the code
+// These counters are only useful/meaningful in controlled test environments where there
+// is only one thread updating each set of counters, i.e., every communicator has its
+// own proxy thread and the network uses only one thread to make progress (this is true
+// for net_ib plugin but might not be true for net_socket plugin).
+...
+\end{lstlisting}
+
+singlenode
+\begin{itemize}
+  \item coll singlenode (1mil iters, 100 warmup iters):
+  \begin{itemize}
+    \item sbatch run 1: 7.64µs overhead. averaged 26.40 µs per iter w/o. 34.04 µs w/ profiler 
+  \end{itemize}
+
+  \item p2p singlenode (1mil iters 100 warmup iters):
+  \begin{itemize}
+    \item sbatch run 1: 7.26µs overhead. averaged 26.66 µs per iter w/o. 33.92 µs w/ profiler 
+  \end{itemize}
+
+  \item commops singlenode (10000 iters, 100 warmup iters):
+  \begin{itemize}
+    \item sbatch run 1: check slurm 2697340 ...
+  \end{itemize}
+\end{itemize}
+
+multinode
+\begin{itemize}
+  \item coll multinode (1mil iters, 100 warmup iters):
+  \begin{itemize}
+    \item sbatch run 1: check slurm 2697154 ...
+  \end{itemize}
+
+  \item p2p multinode (1mil iters 100 warmup iters):
+  \begin{itemize}
+    \item sbatch run 1: not measurable. averaged 21.17 µs per iter w/o. 20.82 µs w/ profiler 
+  \end{itemize}
+
+  \item commops multinode (10000 iters, 100 warmup iters):
+  \begin{itemize}
+    \item sbatch run 1: check slurm 2697341 ...
+  \end{itemize}
+\end{itemize}
+
+
+TODO run experiments multiple times?
+
 
 TODO
 accuracy and reliability/consistency of the the timings of profiler api calls from nccl
