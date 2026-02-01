@@ -93,6 +93,26 @@
 
 TODO: nach Bedarf erw\"ahnen -- MPI-Konzepte, NCCL-Konzepte, SLURM-Konzepte.
 
+
+% ---------------------------------------------------------------------------
+\subsection{Comparison to MPI (TODO)}
+% ---------------------------------------------------------------------------
+
+MPI
+\begin{itemize}
+  \item Zentriert um CPU-Prozesse
+  \item Rank = CPU-Prozess
+  \item 1 Ranks/Tasks pro 1 CPU-Prozess
+\end{itemize}
+
+NCCL
+\begin{itemize}
+  \item Zentriert um GPUs; CPU-Threads helfen kommunikation zu orchestrieren
+  \item Rank = GPU-Device
+  \item mehrere Ranks pro CPU-Thread möglich (? TODO true if i get this to work: check slurm 2694771 multi gpu per task)
+\end{itemize}
+
+
 \subsection{NCCL Concepts}
 
 Bevor die Profiler Plugin API genauer betrachtet wird, ist es hilfreich zu verstehen, was NCCL intern tut, wenn eine Anwendung die NCCL User API aufruft.
@@ -517,25 +537,6 @@ Quelle: \url{https://github.com/NVIDIA/nccl/tree/master/ext-profiler/README.md}
 Die Instrumentierung von Kernel-Events nutzt Z\"ahler, die der Kernel an den Host und den Proxy-Progress-Thread liefert. Die Proxy-Progress-Thread-Infrastruktur wird also von Netzwerk und Profiler geteilt. Wenn der Proxy Netzwerkanfragen bedient, kann das Auslesen der Kernel-Profiling-Daten verz\"ogert werden (Genauigkeitsverlust). Ebenso bei starker CPU-Last und verz\"ogerter Planung des Proxy-Progress-Threads.
 
 Ab Profiler-Version 4 verwendet NCCL einen Ringpuffer von 64 Elementen pro Kanal. Jeder Z\"ahler wird durch zwei vom NCCL-Kernel gelieferte Timestamps (ptimers) erg\"anzt (Start/Ende der Operation im Kernel). NCCL \"ubergibt diese Timestamps an das Profiler-Plugin, damit es sie in die CPU-Zeitdom\"ane umrechnen kann.
-
-% ---------------------------------------------------------------------------
-\section{Comparison to MPI (TODO)}
-% ---------------------------------------------------------------------------
-
-\subsection{MPI}
-\begin{itemize}
-  \item Zentriert um CPU-Prozesse, die kommunizieren
-  \item Ranks/Tasks pro CPU-Prozess
-  \item Rank = CPU-Prozess
-\end{itemize}
-
-\subsection{NCCL}
-\begin{itemize}
-  \item Zentriert um GPUs, die kommunizieren; CPU-Prozesse/Threads orchestrieren
-  \item Ranks/Tasks m\"oglicherweise pro CPU-Thread
-  \item Ranks/Tasks ggf.\ einer GPU (oder vielen GPUs? TODO) zugeordnet
-  \item Rank = GPU-Device
-\end{itemize}
 
 % ---------------------------------------------------------------------------
 \section{TODO}

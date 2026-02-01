@@ -1,10 +1,10 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.28 (TeX Live 2025) (preloaded format=pdflatex 2026.1.30)  1 FEB 2026 17:05
+This is pdfTeX, Version 3.141592653-2.6-1.40.28 (TeX Live 2025) (preloaded format=pdflatex 2026.1.30)  1 FEB 2026 23:03
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
  %&-line parsing enabled.
-**"c:/Users/morit/Desktop/uni/hauptseminar nccl/nccl/uni_report_latex/untitlte.tex"
-(c:/Users/morit/Desktop/uni/hauptseminar nccl/nccl/uni_report_latex/untitlte.tex
+**"c:/Users/morit/Desktop/uni/hauptseminar nccl/nccl/uni_report_latex/en/uni_nccl_report.tex"
+(c:/Users/morit/Desktop/uni/hauptseminar nccl/nccl/uni_report_latex/en/uni_nccl_report.tex
 LaTeX2e <2025-11-01>
 L3 programming layer <2026-01-19>
 (c:/a/texlive/2025/texmf-dist/tex/latex/base/article.cls
@@ -66,14 +66,18 @@ LaTeX Encoding Info:    Ignoring declaration for text command \SS (encoding ?) o
  (c:/a/texlive/2025/texmf-dist/tex/generic/babel/txtbabel.def)
 \bbl@readstream=\read2
 \bbl@dirlevel=\count287
- (c:/a/texlive/2025/texmf-dist/tex/generic/babel/locale/invalid/babel-ngerman.tex)
-Package babel Info: Importing font and identification data for ngerman
-(babel)             from babel-de.ini. Reported on input line 4330.
- (c:/a/texlive/2025/texmf-dist/tex/generic/babel-german/ngerman.ldf
-Language: ngerman 
- (c:/a/texlive/2025/texmf-dist/tex/generic/babel-german/babel-german.def
-Package babel Info: Making " an active character on input line 459.
-))) (c:/a/texlive/2025/texmf-dist/tex/latex/amsmath/amsmath.sty
+ (c:/a/texlive/2025/texmf-dist/tex/generic/babel/locale/en/babel-english.tex)
+Package babel Info: Importing font and identification data for english
+(babel)             from babel-en.ini. Reported on input line 4330.
+ (c:/a/texlive/2025/texmf-dist/tex/generic/babel-english/english.ldf
+Language: english 2017/06/06 v3.3r English support from the babel system
+Package babel Info: Hyphen rules for 'canadian' set to \l@english
+(babel)             (\language0). Reported on input line 102.
+Package babel Info: Hyphen rules for 'australian' set to \l@ukenglish
+(babel)             (\language22). Reported on input line 105.
+Package babel Info: Hyphen rules for 'newzealand' set to \l@ukenglish
+(babel)             (\language22). Reported on input line 108.
+)) (c:/a/texlive/2025/texmf-dist/tex/latex/amsmath/amsmath.sty
 Package: amsmath 2025/07/09 v2.17z AMS math features
 \@mathmargin=\skip51
 
@@ -500,30 +504,27 @@ Package: ifthen 2024/03/16 v1.1e Standard LaTeX ifthen package (DPC)
 ) (c:/a/texlive/2025/texmf-dist/tex/latex/l3backend/l3backend-pdftex.def
 File: l3backend-pdftex.def 2025-10-09 L3 backend support: PDF output (pdfTeX)
 \l__color_backend_stack_int=\count348
-) (./untitlte.aux
-Package babel Info: 'ngerman' activates 'german' shorthands.
-(babel)             Reported on input line 8.
-)
-\openout1 = `untitlte.aux'.
+) (./uni_nccl_report.aux)
+\openout1 = `uni_nccl_report.aux'.
 
-LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 36.
-LaTeX Font Info:    ... okay on input line 36.
-LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 36.
-LaTeX Font Info:    ... okay on input line 36.
-LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 36.
-LaTeX Font Info:    ... okay on input line 36.
-LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 36.
-LaTeX Font Info:    ... okay on input line 36.
-LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 36.
-LaTeX Font Info:    ... okay on input line 36.
-LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 36.
-LaTeX Font Info:    ... okay on input line 36.
-LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 36.
-LaTeX Font Info:    ... okay on input line 36.
-LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 36.
-LaTeX Font Info:    ... okay on input line 36.
-LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 36.
-LaTeX Font Info:    ... okay on input line 36.
+LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 45.
+LaTeX Font Info:    ... okay on input line 45.
+LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 45.
+LaTeX Font Info:    ... okay on input line 45.
+LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 45.
+LaTeX Font Info:    ... okay on input line 45.
+LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 45.
+LaTeX Font Info:    ... okay on input line 45.
+LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 45.
+LaTeX Font Info:    ... okay on input line 45.
+LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 45.
+LaTeX Font Info:    ... okay on input line 45.
+LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 45.
+LaTeX Font Info:    ... okay on input line 45.
+LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 45.
+LaTeX Font Info:    ... okay on input line 45.
+LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 45.
+LaTeX Font Info:    ... okay on input line 45.
 
 *geometry* driver: auto-detecting
 *geometry* detected driver: pdftex
@@ -579,93 +580,97 @@ Package epstopdf-base Info: Redefining graphics rule for `.eps' on input line 48
  (c:/a/texlive/2025/texmf-dist/tex/latex/latexconfig/epstopdf-sys.cfg
 File: epstopdf-sys.cfg 2010/07/13 v1.3 Configuration of (r)epstopdf for TeX Live
 ))
-Package hyperref Info: Link coloring OFF on input line 36.
- (./untitlte.out) (./untitlte.out)
+Package hyperref Info: Link coloring OFF on input line 45.
+ (./uni_nccl_report.out) (./uni_nccl_report.out)
 \@outlinefile=\write4
-\openout4 = `untitlte.out'.
+\openout4 = `uni_nccl_report.out'.
 
- (./untitlte.toc [1
+ (./uni_nccl_report.toc [1
 
 {c:/a/texlive/2025/texmf-var/fonts/map/pdftex/updmap/pdftex.map}{c:/a/texlive/2025/texmf-dist/fonts/enc/dvips/cm-super/cm-super-t1.enc}])
 \tf@toc=\write5
-\openout5 = `untitlte.toc'.
+\openout5 = `uni_nccl_report.toc'.
 
- [2{c:/a/texlive/2025/texmf-dist/fonts/enc/dvips/cm-super/cm-super-ts1.enc}] [3] (c:/a/texlive/2025/texmf-dist/tex/latex/listings/lstlang1.sty
+ [2{c:/a/texlive/2025/texmf-dist/fonts/enc/dvips/cm-super/cm-super-ts1.enc}] (c:/a/texlive/2025/texmf-dist/tex/latex/listings/lstlang1.sty
 File: lstlang1.sty 2025/11/14 1.11b listings language file
 ) (c:/a/texlive/2025/texmf-dist/tex/latex/listings/lstmisc.sty
 File: lstmisc.sty 2025/11/14 1.11b (Carsten Heinz)
-)
-Overfull \hbox (77.59944pt too wide) in paragraph at lines 156--157
-\T1/cmtt/m/n/10.95 NCCL_PROFILER_PLUGIN\T1/cmr/m/n/10.95 ; if that fails, at-t-empt loa-ding \T1/cmtt/m/n/10.95 libnccl-profiler-<NCCL_PROFILER_PLUGIN>.so\T1/cmr/m/n/10.95 .
+) [3] [4]
+Overfull \hbox (4.3557pt too wide) in paragraph at lines 187--188
+[]\T1/cmr/m/n/10.95 The guards \T1/cmtt/m/n/10.95 if (proxyState->refCount == 1) \T1/cmr/m/n/10.95 and \T1/cmtt/m/n/10.95 if (!state->thread) \T1/cmr/m/n/10.95 en-sure that these threads
  []
 
 
-Overfull \hbox (3.80702pt too wide) in paragraph at lines 156--157
-\T1/cmr/m/n/10.95 gin was found, do not ena-ble pro-fi-ling. If \T1/cmtt/m/n/10.95 NCCL_PROFILER_PLUGIN \T1/cmr/m/n/10.95 is set to \T1/cmtt/m/n/10.95 STATIC_PLUGIN\T1/cmr/m/n/10.95 ,
+Overfull \hbox (3.71455pt too wide) in paragraph at lines 210--212
+\T1/cmtt/m/n/10.95 comm->proxyState->thread is pthread_join()'d by commFree() in init.cc when
  []
 
-[4]
-Overfull \hbox (6.69447pt too wide) in paragraph at lines 159--160
-[]\T1/cmr/m/n/10.95 (Quelle: NC-CL docs, Ab-schnitt \T1/cmtt/m/n/10.95 NCCL_PROFILER_PLUGIN\T1/cmr/m/n/10.95 : []$\T1/cmtt/m/n/10.95 https : / / docs . nvidia . com / deeplearning /
- []
-
-
-Overfull \hbox (65.2741pt too wide) in paragraph at lines 161--162
-[]\T1/cmr/m/n/10.95 The ex-act im-ple-men-ta-ti-on de-tails can be found at \T1/cmtt/m/n/10.95 /src/plugin/plugin_open.cc \T1/cmr/m/n/10.95 and \T1/cmtt/m/n/10.95 /src/plugin/profiler.cc\T1/cmr/m/n/10.95 . 
- []
-
-[5]
-Overfull \hbox (25.85709pt too wide) in paragraph at lines 245--246
-[]\T1/cmr/m/n/10.95 callbacks for events di-rect-ly re-la-ted to the ap-p-li-ca-ti-on cal-ling the NC-CL API (e.g. \T1/cmtt/m/n/10.95 ncclAllReduce()\T1/cmr/m/n/10.95 ) 
- []
-
-[6]
-\pgf@layerbox@umlsd@background=\box69
-\pgf@layerboxsaved@umlsd@background=\box70
-\pgf@layerbox@umlsd@threadlayer=\box71
-\pgf@layerboxsaved@umlsd@threadlayer=\box72
-
-Overfull \hbox (739.11725pt too wide) in paragraph at lines 257--291
- [][] 
+[5] [6]
+Overfull \hbox (146.26903pt too wide) in paragraph at lines 312--313
+\T1/cmr/m/n/10.95 filer plu-gin, check-ing the en-vi-ron-ment vari-able \T1/cmtt/m/n/10.95 NCCL_PROFILER_PLUGIN\T1/cmr/m/n/10.95 : \T1/cmtt/m/n/10.95 profilerName = ncclGetEnv("NCCL_PROFILER_PLUGIN")\T1/cmr/m/n/10.95 . 
  []
 
 
-LaTeX Warning: Float too large for page by 333.20985pt on input line 292.
-
-
-LaTeX Warning: `h' float specifier changed to `ht'.
-
-
-Overfull \hbox (46.37134pt too wide) in paragraph at lines 314--315
-[]\T1/cmr/m/n/10.95 See im-ple-men-ta-ti-on de-tails at \T1/cmtt/m/n/10.95 /src/init.cc\T1/cmr/m/n/10.95 , \T1/cmtt/m/n/10.95 /src/plugin/profiler.cc \T1/cmr/m/n/10.95 and \T1/cmtt/m/n/10.95 /src/plugin/plugin_open.cc\T1/cmr/m/n/10.95 . 
+Overfull \hbox (153.06331pt too wide) in paragraph at lines 314--315
+[]\T1/cmr/m/n/10.95 It then calls \T1/cmtt/m/n/10.95 handle* = dlopen(name, RTLD_NOW | RTLD_LOCAL) \T1/cmr/m/n/10.95 and \T1/cmtt/m/n/10.95 ncclProfiler_v5 = (ncclProfiler_v5_t*)dlsym(handle,
  []
 
-[7] [8]
-Overfull \hbox (44.57683pt too wide) in paragraph at lines 377--378
-\T1/cmr/m/n/10.95 See NC-CL docs: []$\T1/cmtt/m/n/10.95 https : / / docs . nvidia . com / deeplearning / nccl / user-[]guide / docs / env . html # nccl-[]debug$[] 
+
+Overfull \hbox (71.20906pt too wide) in paragraph at lines 324--325
+\T1/cmr/m/n/10.95 (Source: []$\T1/cmtt/m/n/10.95 https : / / docs . nvidia . com / deeplearning / nccl / user-[]guide / docs / env . html # nccl-[]profiler-[]plugin$[]\T1/cmr/m/n/10.95 ) 
  []
 
-[9] [10] [11] (./untitlte.aux)
+[7]
+Overfull \hbox (43.41933pt too wide) in paragraph at lines 351--352
+[][] 
+ []
+
+
+Overfull \hbox (71.76268pt too wide) in paragraph at lines 352--353
+[][] 
+ []
+
+
+Overfull \hbox (32.08199pt too wide) in paragraph at lines 354--355
+[][] 
+ []
+
+
+Overfull \hbox (26.41331pt too wide) in paragraph at lines 355--356
+[][] 
+ []
+
+
+Overfull \hbox (15.07597pt too wide) in paragraph at lines 355--356
+[][] 
+ []
+
+
+Overfull \hbox (92.53716pt too wide) in paragraph at lines 361--362
+\T1/cmr/m/n/10.95 gin load-ing mech-a-nism ex-pects the struct vari-able name to fol-low the nam-ing con-ven-tion \T1/cmtt/m/n/10.95 ncclProfiler_v{versionNum}\T1/cmr/m/n/10.95 ,
+ []
+
+[8] [9] [10] [11] [12] [13] [14] [15] [16] [17] [18] (./uni_nccl_report.aux)
  ***********
 LaTeX2e <2025-11-01>
 L3 programming layer <2026-01-19>
  ***********
-Package rerunfilecheck Info: File `untitlte.out' has not changed.
-(rerunfilecheck)             Checksum: 49FFD1011B41A2DF694D628F31D3FC8E;4719.
+Package rerunfilecheck Info: File `uni_nccl_report.out' has not changed.
+(rerunfilecheck)             Checksum: 84050B14288275A7F239E929BF568D41;5036.
  ) 
 Here is how much of TeX's memory you used:
- 24557 strings out of 467533
- 449758 string characters out of 5422626
- 1144501 words of memory out of 5000000
- 52984 multiletter control sequences out of 15000+600000
- 639405 words of font info for 67 fonts, out of 8000000 for 9000
+ 24669 strings out of 467533
+ 449092 string characters out of 5422626
+ 1282337 words of memory out of 5000000
+ 52787 multiletter control sequences out of 15000+600000
+ 640483 words of font info for 69 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 84i,12n,94p,602b,1248s stack positions out of 10000i,1000n,20000p,200000b,200000s
-<c:/a/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfbx1095.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfbx1200.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfbx1440.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfrm1095.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfrm1728.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sftt1000.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sftt1095.pfb>
-Output written on untitlte.pdf (11 pages, 228347 bytes).
+ 84i,6n,94p,1069b,2108s stack positions out of 10000i,1000n,20000p,200000b,200000s
+<c:/a/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi8.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfbx1095.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfbx1200.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfbx1440.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfrm1095.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfrm1728.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sftt0900.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sftt1000.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sftt1095.pfb>
+Output written on uni_nccl_report.pdf (18 pages, 326818 bytes).
 PDF statistics:
- 362 PDF objects out of 1000 (max. 8388607)
- 312 compressed objects within 4 object streams
- 106 named destinations out of 1000 (max. 500000)
- 333 words of extra memory for PDF output out of 10000 (max. 10000000)
+ 770 PDF objects out of 1000 (max. 8388607)
+ 701 compressed objects within 8 object streams
+ 416 named destinations out of 1000 (max. 500000)
+ 309 words of extra memory for PDF output out of 10000 (max. 10000000)
 

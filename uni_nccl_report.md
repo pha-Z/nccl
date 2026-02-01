@@ -279,11 +279,8 @@ ncclCommGrow()             ─┐     ┌─────────────
                                   ├──► ncclProfilerPluginInit(comm)─┐
                                   └──► ncclProxyCreate(comm)        │
                                        │                            ▼
-                                       ▼                            ncclProxyCreate(comm)
-                                       ...                          │
-                                                                    ▼
-                                                                    ncclProfilerPluginInit(comm)
-                                                                    ├──► ncclProfilerPluginLoad()
+                                       ▼                            ncclProfilerPluginInit(comm)
+                                       ...                          ├──► ncclProfilerPluginLoad()
                                                                     │    ├──► ncclGetEnv("NCCL_PROFILER_PLUGIN")
                                                                     │    ├──► ncclOpenProfilerPluginLib()
                                                                     │    │    └──► dlopen(name, RTLD_NOW | RTLD_LOCAL)
