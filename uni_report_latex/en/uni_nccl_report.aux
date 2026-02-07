@@ -9,32 +9,40 @@
 \@writefile{toc}{\contentsline {subsection}{\numberline {1.1}Table of Contents}{2}{subsection.1.1}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {1.2}Main content chunks / concepts}{2}{subsection.1.2}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {2}Abstract}{3}{section.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {3}Introduction}{3}{section.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}NCCL vs MPI - Comparison (TODO)}{3}{subsection.3.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Relevant NCCL internals}{3}{subsection.3.2}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Thread creation flow: User API $\to $ NCCL internal init $\to $ spawn ProxyService $\to $ spawn ProxyProgress.}}{5}{figure.1}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Flow from User API to \texttt  {ncclProxyPost()}: two entry families merge at \texttt  {ncclGroupEndInternal()}, then launch and proxy path to \texttt  {ncclProxyPost()}.}}{6}{figure.2}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces \textbf  {/src/proxy.cc} \texttt  {ncclProxyProgress()} progressing loop: progress ops, then get posted ops (or wait). }}{7}{figure.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {3}About NCCL}{3}{section.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Comparison to MPI}{3}{subsection.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Relevant NCCL internals}{4}{subsection.3.2}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Thread creation: User API $\to $ NCCL internal init $\to $ create ProxyService $\to $ create ProxyProgress.}}{4}{figure.1}\protected@file@percent }
+\newlabel{fig:thread-creation}{{1}{4}{Thread creation: User API $\to $ NCCL internal init $\to $ create ProxyService $\to $ create ProxyProgress}{figure.1}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Flow from User API to \texttt  {ncclProxyPost()}}}{6}{figure.2}\protected@file@percent }
+\newlabel{fig:proxy-post}{{2}{6}{Flow from User API to \texttt {ncclProxyPost()}}{figure.2}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces \textbf  {/src/proxy.cc} \texttt  {ncclProxyProgress()} progressing loop: progress ops, then get posted ops (or wait). }}{6}{figure.3}\protected@file@percent }
+\newlabel{fig:proxy-progress-loop}{{3}{6}{\textbf {/src/proxy.cc} \texttt {ncclProxyProgress()} progressing loop: progress ops, then get posted ops (or wait)}{figure.3}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {4}The Profiler API}{7}{section.4}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.1}How NCCL detects the profiler plugin}{7}{subsection.4.1}\protected@file@percent }
 \@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces User API $\to $ NCCL init $\to $ load profiler plugin and call \texttt  {profiler->init()}.}}{8}{figure.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}The profiler API definition}{9}{subsection.4.2}\protected@file@percent }
+\newlabel{fig:profiler-init}{{4}{8}{User API $\to $ NCCL init $\to $ load profiler plugin and call \texttt {profiler->init()}}{figure.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}The profiler API definition}{8}{subsection.4.2}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsubsection}{\numberline {4.2.1}init}{9}{subsubsection.4.2.1}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsubsection}{\numberline {4.2.2}startEvent}{10}{subsubsection.4.2.2}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Flow from NCCL API calls to profiler events: where \texttt  {startEvent} and \texttt  {stopEvent} are emitted along the internal path.}}{12}{figure.5}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces \texttt  {ncclProxyProgress()} event emission: progress ops (emit ProxyStep/KernelCh/NetPlugin), state transitions (ProxyCtrl), get posted ops, ProxyAppend (ProxyOp).}}{13}{figure.6}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.2.3}stopEvent}{14}{subsubsection.4.2.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.2.3}stopEvent}{11}{subsubsection.4.2.3}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Flow from NCCL API calls to profiler events. In case of \texttt  {ncclGroupStart / ncclGroupEnd}. multiple events of everything (except GroupApi) are called. internally, some Collectives (e.g. ncclAlltoAll) are implemented as many p2p ops, triggering many P2pApi and P2p events. Implementation: \textbf  {/src/init.cc}, \textbf  {/src/plugin/profiler.cc}.}}{12}{figure.5}\protected@file@percent }
+\newlabel{fig:profiler-events}{{5}{12}{Flow from NCCL API calls to profiler events. In case of \texttt {ncclGroupStart / ncclGroupEnd}. multiple events of everything (except GroupApi) are called. internally, some Collectives (e.g. ncclAlltoAll) are implemented as many p2p ops, triggering many P2pApi and P2p events. Implementation: \textbf {/src/init.cc}, \textbf {/src/plugin/profiler.cc}}{figure.5}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces \texttt  {ncclProxyProgress}: progressOps emits ProxyStep/KernelCh/NetPlugin events. getPostedOps emits ProxyOp events. Several events ProxyCtrl are also emitted}}{13}{figure.6}\protected@file@percent }
+\newlabel{fig:proxy-event-emission}{{6}{13}{\texttt {ncclProxyProgress}: progressOps emits ProxyStep/KernelCh/NetPlugin events. getPostedOps emits ProxyOp events. Several events ProxyCtrl are also emitted}{figure.6}{}}
 \@writefile{toc}{\contentsline {subsubsection}{\numberline {4.2.4}recordEventState}{14}{subsubsection.4.2.4}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsubsection}{\numberline {4.2.5}finalize}{14}{subsubsection.4.2.5}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.2.6}name}{14}{subsubsection.4.2.6}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces User API $\to $ \texttt  {commReclaim()} $\to $ \texttt  {finalize()} $\to $ plugin unload.}}{15}{figure.7}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces User API $\to $ \texttt  {commReclaim()} $\to $ \texttt  {finalize()} $\to $ plugin unload.}}{14}{figure.7}\protected@file@percent }
+\newlabel{fig:profiler-finalize}{{7}{14}{User API $\to $ \texttt {commReclaim()} $\to $ \texttt {finalize()} $\to $ plugin unload}{figure.7}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.2.6}name}{15}{subsubsection.4.2.6}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Code Examples}{15}{subsection.4.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.4}What is possible with the Profiler Plugin API? Considerations and Pitfalls for (logging, running metrics, CUPTI, \ldots  ) when writing the plugin - section title WIP }{15}{subsection.4.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.5}Performance and scalability of the Profiler Plugin API}{17}{subsection.4.5}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {5}Potential Integration with Score-P}{18}{section.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.3.1}single process multiple devices}{16}{subsubsection.4.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4}What is possible with the Profiler Plugin API? Considerations and Pitfalls for (logging, running metrics, CUPTI, \ldots  ) when writing the plugin - section title WIP }{16}{subsection.4.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.5}Performance and scalability of the Profiler Plugin API}{18}{subsection.4.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Potential Integration with Score-P}{19}{section.5}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {6}Conclusion - What i have shown. Why would you use it? pros \& cons}{19}{section.6}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}NCCL\_DEBUG}{19}{subsection.6.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}Known limitations}{19}{subsection.6.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Summarize What i have shown TODO}{19}{subsection.6.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}NCCL\_DEBUG}{20}{subsection.6.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}Known limitations}{20}{subsection.6.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Summarize What i have shown TODO}{20}{subsection.6.3}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {7}TODO}{20}{section.7}\protected@file@percent }
 \gdef \@abspage@last{20}
