@@ -13,8 +13,8 @@
         
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #1e1e1e;
-            color: #d4d4d4;
+            background: #f5f5f5;
+            color: #333333;
             padding: 20px;
         }
         
@@ -24,12 +24,12 @@
         }
         
         h1 {
-            color: #4ec9b0;
+            color: #0d9488;
             margin-bottom: 20px;
         }
         
         .controls {
-            background: #252526;
+            background: #e8e8e8;
             padding: 15px;
             border-radius: 5px;
             margin-bottom: 20px;
@@ -47,7 +47,7 @@
         
         .control-group > label:first-child {
             font-size: 12px;
-            color: #858585;
+            color: #666666;
             height: 16px;
             line-height: 16px;
         }
@@ -84,7 +84,7 @@
         
         .control-group.checkbox-option label {
             font-size: 12px;
-            color: #d4d4d4;
+            color: #333333;
             cursor: pointer;
         }
         
@@ -94,20 +94,20 @@
             justify-content: center;
             gap: 5px;
             padding: 3px 8px;
-            background: #3c3c3c;
+            background: #e0e0e0;
             border-radius: 3px;
-            border: 1px solid #555;
+            border: 1px solid #999;
             cursor: pointer;
             user-select: none;
             font-size: 11px;
-            color: #d4d4d4;
+            color: #333333;
             min-width: 40px;
             height: 24px;
         }
         
         .type-filter-btn:hover {
-            background: #4a4a4a;
-            border-color: #666;
+            background: #d5d5d5;
+            border-color: #999;
         }
         
         .type-checkbox-item {
@@ -115,9 +115,9 @@
             align-items: center;
             gap: 5px;
             padding: 3px 8px;
-            background: #3c3c3c;
+            background: #e0e0e0;
             border-radius: 3px;
-            border: 1px solid #555;
+            border: 1px solid #999;
             cursor: pointer;
             user-select: none;
             font-size: 11px;
@@ -125,8 +125,8 @@
         }
         
         .type-checkbox-item:hover {
-            background: #4a4a4a;
-            border-color: #666;
+            background: #d5d5d5;
+            border-color: #999;
         }
         
         .type-checkbox-item input[type="checkbox"] {
@@ -135,24 +135,24 @@
         }
         
         .type-checkbox-item input[type="checkbox"]:checked + span + label {
-            color: #4ec9b0;
+            color: #0d9488;
         }
         
         .type-checkbox-item label {
             margin: 0;
             cursor: pointer;
-            color: #d4d4d4;
+            color: #333333;
         }
         
         label {
             font-size: 12px;
-            color: #858585;
+            color: #666666;
         }
         
         select, input[type="number"] {
-            background: #3c3c3c;
-            color: #d4d4d4;
-            border: 1px solid #555;
+            background: #ffffff;
+            color: #333333;
+            border: 1px solid #999;
             padding: 5px 10px;
             border-radius: 3px;
             height: 28px;
@@ -164,7 +164,7 @@
         }
         
         #timeline-container {
-            background: #252526;
+            background: #e8e8e8;
             border-radius: 5px;
             padding: 20px;
             overflow-x: auto;
@@ -175,18 +175,18 @@
         
         #timeline-canvas {
             display: block;
-            background: #1e1e1e;
+            background: #ffffff;
         }
         
         .legend {
-            background: #252526;
+            background: #e8e8e8;
             padding: 15px;
             border-radius: 5px;
             margin-top: 20px;
         }
         
         .legend h3 {
-            color: #4ec9b0;
+            color: #0d9488;
             margin-bottom: 10px;
         }
         
@@ -206,7 +206,7 @@
             width: 20px;
             height: 20px;
             border-radius: 3px;
-            border: 1px solid #555;
+            border: 1px solid #999;
         }
         
         .legend-label {
@@ -225,9 +225,9 @@
             align-items: center;
             gap: 15px;
             padding: 10px;
-            background: #1e1e1e;
+            background: #ffffff;
             border-radius: 5px;
-            border: 1px solid #333;
+            border: 1px solid #bbb;
         }
         
         .element-visual {
@@ -242,23 +242,23 @@
         .element-bar {
             width: 40px;
             height: 16px;
-            background: #569cd6;
-            border: 1px solid #fff;
+            background: #2563eb;
+            border: 1px solid #333;
             border-radius: 2px;
         }
         
         .element-desc {
             font-size: 12px;
-            color: #d4d4d4;
+            color: #333333;
             line-height: 1.4;
         }
         
         .element-desc strong {
-            color: #4ec9b0;
+            color: #0d9488;
         }
         
         .info-panel {
-            background: #252526;
+            background: #e8e8e8;
             padding: 15px;
             border-radius: 5px;
             margin-top: 20px;
@@ -267,8 +267,8 @@
             bottom: 0;
             z-index: 100;
             min-height: 50px;
-            box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.3);
-            width: 33%;
+            box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.12);
+            width: 25%;
             max-width: 500px;
         }
         
@@ -280,7 +280,7 @@
         .loading {
             text-align: center;
             padding: 40px;
-            color: #858585;
+            color: #666666;
         }
     </style>
 </head>
@@ -396,7 +396,7 @@
                 <div class="element-item">
                     <div class="element-visual">
                         <svg width="30" height="20" style="display: block;">
-                            <polygon points="0,5 20,10 0,15" fill="#569cd6" stroke="#fff" stroke-width="1"/>
+                            <polygon points="0,5 20,10 0,15" fill="#2563eb" stroke="#333" stroke-width="1"/>
                         </svg>
                     </div>
                     <div class="element-desc">
@@ -406,7 +406,7 @@
                 <div class="element-item">
                     <div class="element-visual">
                         <svg width="30" height="20" style="display: block;">
-                            <polygon points="20,5 0,10 20,15" fill="#569cd6" stroke="#fff" stroke-width="1"/>
+                            <polygon points="20,5 0,10 20,15" fill="#2563eb" stroke="#333" stroke-width="1"/>
                         </svg>
                     </div>
                     <div class="element-desc">
@@ -416,7 +416,7 @@
                 <div class="element-item">
                     <div class="element-visual">
                         <svg width="30" height="20" style="display: block;">
-                            <circle cx="10" cy="10" r="6" fill="#569cd6" stroke="#fff" stroke-width="1"/>
+                            <circle cx="10" cy="10" r="6" fill="#2563eb" stroke="#333" stroke-width="1"/>
                         </svg>
                     </div>
                     <div class="element-desc">
@@ -426,8 +426,8 @@
                 <div class="element-item">
                     <div class="element-visual">
                         <svg width="30" height="20" style="display: block;" viewBox="0 -5 30 20">
-                            <line x1="10" y1="0" x2="10" y2="10" stroke="#569cd6" stroke-width="2"/>
-                            <circle cx="10" cy="0" r="3" fill="#ff6b6b" stroke="#fff" stroke-width="1"/>
+                            <line x1="10" y1="0" x2="10" y2="10" stroke="#2563eb" stroke-width="2"/>
+                            <circle cx="10" cy="0" r="3" fill="#b91c1c" stroke="#333" stroke-width="1"/>
                         </svg>
                     </div>
                     <div class="element-desc">
@@ -437,8 +437,8 @@
                 <div class="element-item">
                     <div class="element-visual">
                         <svg width="30" height="20" style="display: block;">
-                            <circle cx="10" cy="8" r="6" fill="#ff6b6b" stroke="#fff" stroke-width="1"/>
-                            <polygon points="10,14 7,18 13,18" fill="#ff6b6b" stroke="#fff" stroke-width="1"/>
+                            <circle cx="10" cy="8" r="6" fill="#b91c1c" stroke="#333" stroke-width="1"/>
+                            <polygon points="10,14 7,18 13,18" fill="#b91c1c" stroke="#333" stroke-width="1"/>
                         </svg>
                     </div>
                     <div class="element-desc">
@@ -448,7 +448,7 @@
                 <div class="element-item">
                     <div class="element-visual">
                         <svg width="30" height="20" style="display: block;">
-                            <line x1="5" y1="5" x2="25" y2="15" stroke="#ff6b6b" stroke-width="2"/>
+                            <line x1="5" y1="5" x2="25" y2="15" stroke="#b91c1c" stroke-width="2"/>
                         </svg>
                     </div>
                     <div class="element-desc">
@@ -458,38 +458,38 @@
                 <div class="element-item">
                     <div class="element-visual">
                         <svg width="30" height="20" style="display: block;">
-                            <line x1="5" y1="5" x2="25" y2="15" stroke="#00d4ff" stroke-width="2" stroke-dasharray="5,3"/>
+                            <line x1="5" y1="5" x2="25" y2="15" stroke="#059669" stroke-width="2" stroke-dasharray="5,3"/>
                         </svg>
                     </div>
                     <div class="element-desc">
-                        <strong>Cyan Dotted Line:</strong> Connects NCCL events to their correlated CUPTI activities (based on extCorrId - external correlation ID from CUPTI).
+                        <strong>Green Dotted Line:</strong> Connects NCCL events to their correlated CUPTI activities (based on extCorrId - external correlation ID from CUPTI).
                     </div>
                 </div>
             </div>
-            <div style="margin-top: 20px; padding: 15px; background: #1e1e1e; border-radius: 5px; border: 1px solid #333;">
-                <h4 style="color: #ffa500; margin-bottom: 10px;">CUPTI Activity Colors</h4>
+            <div style="margin-top: 20px; padding: 15px; background: #ffffff; border-radius: 5px; border: 1px solid #bbb;">
+                <h4 style="color: #ea580c; margin-bottom: 10px;">CUPTI Activity Colors</h4>
                 <div style="display: flex; gap: 20px; flex-wrap: wrap; font-size: 12px;">
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="width: 20px; height: 14px; background: #ffa500; border: 1px solid #555; border-radius: 2px; display: inline-block;"></span>
+                        <span style="width: 20px; height: 14px; background: #ea580c; border: 1px solid #999; border-radius: 2px; display: inline-block;"></span>
                         <span>CUDA Kernels</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="width: 20px; height: 14px; background: #00ff7f; border: 1px solid #555; border-radius: 2px; display: inline-block;"></span>
+                        <span style="width: 20px; height: 14px; background: #16a34a; border: 1px solid #999; border-radius: 2px; display: inline-block;"></span>
                         <span>Memory Copy (memcpy)</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="width: 20px; height: 14px; background: #ff69b4; border: 1px solid #555; border-radius: 2px; display: inline-block;"></span>
+                        <span style="width: 20px; height: 14px; background: #db2777; border: 1px solid #999; border-radius: 2px; display: inline-block;"></span>
                         <span>Memory Set (memset)</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="width: 20px; height: 14px; background: #9370db; border: 1px solid #555; border-radius: 2px; display: inline-block;"></span>
+                        <span style="width: 20px; height: 14px; background: #7c3aed; border: 1px solid #999; border-radius: 2px; display: inline-block;"></span>
                         <span>Other CUPTI Activities</span>
                     </div>
                 </div>
             </div>
-            <div style="margin-top: 20px; padding: 15px; background: #1e1e1e; border-radius: 5px; border: 1px solid #333;">
-                <h4 style="color: #4ec9b0; margin-bottom: 10px;">About ProfilerLifecycle Events</h4>
-                <div style="font-size: 12px; color: #d4d4d4; line-height: 1.6;">
+            <div style="margin-top: 20px; padding: 15px; background: #ffffff; border-radius: 5px; border: 1px solid #bbb;">
+                <h4 style="color: #0d9488; margin-bottom: 10px;">About ProfilerLifecycle Events</h4>
+                <div style="font-size: 12px; color: #333333; line-height: 1.6;">
                     <p><strong>ProfilerLifecycle</strong> events represent the profiler plugin's tracking period for a communicator on a specific rank:</p>
                     <ul style="margin-left: 20px; margin-top: 8px;">
                         <li><strong>profilerInit:</strong> Called for each rank when the communicator is initialized on that rank (always corresponds to comm initialization on that rank)</li>
@@ -506,26 +506,26 @@
     </div>
     
     <script>
-        // Color palette for event types
+        // Color palette for event types (light-theme friendly for report screenshots)
         const EVENT_COLORS = {
-            'ProfilerLifecycle': '#858585',  // Grey - profiler plugin tracking period (init to finalize)
-            'GroupApi': '#4ec9b0',
-            'CollApi': '#9333ea',
-            'P2pApi': '#c586c0',
-            'KernelLaunch': '#dcdcaa',
-            'Coll': '#c084fc',
-            'P2p': '#fda1f0',
-            'ProxyOp': '#f48771',
-            'ProxyStep': '#f48771',
-            'ProxyCtrl': '#f48771',
-            'KernelCh': '#569cd6',
-            'NetPlugin': '#569cd6',
-            'Group': '#4ec9b0',
-            'CuptiKernel': '#ffa500',    // Orange for CUDA kernels
-            'CuptiMemcpy': '#00ff7f',     // Green for memcpy
-            'CuptiMemset': '#ff69b4',     // Pink for memset
-            'CuptiOther': '#9370db',      // Purple for other CUPTI activities
-            'Unknown': '#858585'
+            'ProfilerLifecycle': '#616161',  // Grey - profiler plugin tracking period (init to finalize)
+            'GroupApi': '#0d9488',
+            'CollApi': '#7c3aed',
+            'P2pApi': '#a855f7',
+            'KernelLaunch': '#ca8a04',
+            'Coll': '#a855f7',
+            'P2p': '#c026d3',
+            'ProxyOp': '#dc2626',
+            'ProxyStep': '#dc2626',
+            'ProxyCtrl': '#dc2626',
+            'KernelCh': '#2563eb',
+            'NetPlugin': '#2563eb',
+            'Group': '#0d9488',
+            'CuptiKernel': '#ea580c',    // Orange for CUDA kernels
+            'CuptiMemcpy': '#16a34a',     // Green for memcpy
+            'CuptiMemset': '#db2777',     // Pink for memset
+            'CuptiOther': '#7c3aed',      // Purple for other CUPTI activities
+            'Unknown': '#616161'
         };
         
         // Hover area expansion (in pixels) for easier hovering on small event bars
@@ -557,6 +557,10 @@
         let isSelecting = false;
         let selectionStartX = 0;
         let selectionEndX = 0;
+        
+        // Reserved width for lane labels (comm, rank, context, etc.) so event bars never overlap them
+        const LABEL_WIDTH = 350;
+        let timelineContentWidth = 400; // Set each render: canvas.width - LABEL_WIDTH
         
         // Helper function to normalize a timestamp (subtract global_min_time)
         function normalizeTimestamp(timestamp) {
@@ -721,7 +725,6 @@
                 start_pid: cuptiRecord.start?.pid ?? null,
                 stop_pid: cuptiRecord.stop?.pid ?? null,
                 duration: cuptiRecord.duration || null,
-                myPid: cuptiRecord.myPid || null,
                 name: cuptiRecord.name || null,
                 stream: cuptiRecord.stream || null,
                 size: cuptiRecord.size || null,
@@ -1096,7 +1099,7 @@
                 applyFilters(); // This will set filteredEvents and render the timeline
             } catch (error) {
                 document.getElementById('timeline-container').innerHTML = 
-                    '<div class="loading" style="color: #f48771;">Error loading trace.jsonl: ' + error.message + '</div>';
+                    '<div class="loading" style="color: #dc2626;">Error loading trace.jsonl: ' + error.message + '</div>';
                 console.error('Error loading events:', error);
             }
         }
@@ -1335,7 +1338,7 @@
                 
                 // Add color indicator
                 const colorBox = document.createElement('span');
-                colorBox.style.cssText = `width: 12px; height: 12px; background: ${EVENT_COLORS[type] || EVENT_COLORS['Unknown']}; border: 1px solid #555; border-radius: 2px; display: inline-block;`;
+                colorBox.style.cssText = `width: 12px; height: 12px; background: ${EVENT_COLORS[type] || EVENT_COLORS['Unknown']}; border: 1px solid #999; border-radius: 2px; display: inline-block;`;
                 
                 checkboxItem.appendChild(checkbox);
                 checkboxItem.appendChild(colorBox);
@@ -1414,7 +1417,7 @@
                     
                     // Add color indicator
                     const colorBox = document.createElement('span');
-                    colorBox.style.cssText = `width: 12px; height: 12px; background: ${EVENT_COLORS[type] || EVENT_COLORS['Unknown']}; border: 1px solid #555; border-radius: 2px; display: inline-block;`;
+                    colorBox.style.cssText = `width: 12px; height: 12px; background: ${EVENT_COLORS[type] || EVENT_COLORS['Unknown']}; border: 1px solid #999; border-radius: 2px; display: inline-block;`;
                     
                     checkboxItem.appendChild(checkbox);
                     checkboxItem.appendChild(colorBox);
@@ -1748,12 +1751,15 @@
                 groups.get(groupKey).push([key, event]);
             });
             
-            // Group CUPTI activities by device ID and type
+            // Group CUPTI activities by GPU UUID (when available) or device ID and type
             const cuptiGroups = new Map();
             cuptiActivities.forEach(([key, activity]) => {
                 const activityType = activity.type || 'CuptiOther';
+                const gpuUuid = activity.gpuUuid || null;
                 const deviceId = activity.deviceId !== null ? activity.deviceId : 'unknown';
-                const groupKey = `cupti_device${deviceId}_type${activityType}`;
+                const groupKey = gpuUuid
+                    ? `cupti_uuid${gpuUuid}_type${activityType}`
+                    : `cupti_device${deviceId}_type${activityType}`;
                 if (!cuptiGroups.has(groupKey)) {
                     cuptiGroups.set(groupKey, []);
                 }
@@ -1856,7 +1862,11 @@
             
             // Process CUPTI activity groups into lanes (similar to NCCL events)
             Array.from(cuptiGroups.entries()).sort((a, b) => {
-                // Sort by device ID first, then by activity type
+                // Sort by GPU UUID first (when available), then device ID, then activity type
+                const uuidA = a[1][0][1].gpuUuid || '';
+                const uuidB = b[1][0][1].gpuUuid || '';
+                if (uuidA !== uuidB) return uuidA.localeCompare(uuidB);
+                
                 const deviceIdA = a[1][0][1].deviceId !== null ? a[1][0][1].deviceId : -1;
                 const deviceIdB = b[1][0][1].deviceId !== null ? b[1][0][1].deviceId : -1;
                 if (deviceIdA !== deviceIdB) return deviceIdA - deviceIdB;
@@ -1999,22 +2009,22 @@
         }
         
         function timeToX(time) {
-            // Calculate X position based on time
-            // Canvas width is already scaled by zoom, so we map time directly to canvas coordinates
-            return ((time - minTime) / (maxTime - minTime)) * canvas.width + panX;
+            // Map time to content area only (labels occupy [0, LABEL_WIDTH])
+            if (!timelineContentWidth || timelineContentWidth <= 0) timelineContentWidth = 1;
+            return LABEL_WIDTH + ((time - minTime) / (maxTime - minTime)) * timelineContentWidth + panX;
         }
         
         function xToTime(x) {
-            // Convert X position back to time
-            // Inverse of timeToX
-            return minTime + ((x - panX) / canvas.width) * (maxTime - minTime);
+            // Convert X position back to time (content area only)
+            if (!timelineContentWidth || timelineContentWidth <= 0) timelineContentWidth = 1;
+            return minTime + ((x - LABEL_WIDTH - panX) / timelineContentWidth) * (maxTime - minTime);
         }
         
         function drawParentChildArrows(lanes, eventToLane, renderedEventsMap) {
             if (!eventsData.parent_child_map || !eventsData.events) return;
             
             ctx.globalAlpha = 0.6; // Semi-transparent so arrows don't obscure events
-            ctx.strokeStyle = '#9cdcfe';
+            ctx.strokeStyle = '#1565c0';
             ctx.lineWidth = 1.5;
             ctx.setLineDash([4, 4]); // Dashed line for arrows
             
@@ -2108,7 +2118,7 @@
             
             ctx.save();
             ctx.globalAlpha = 0.6;
-            ctx.strokeStyle = '#ff6b6b'; // Light red for connections
+            ctx.strokeStyle = '#b91c1c'; // Red for connections
             ctx.lineWidth = 1.5;
             // No dash for collective connections to distinguish from parent-child arrows
             
@@ -2172,7 +2182,7 @@
             
             ctx.save();
             ctx.globalAlpha = 0.6;
-            ctx.strokeStyle = '#858585'; // Grey for profiler lifecycle connections
+            ctx.strokeStyle = '#616161'; // Grey for profiler lifecycle connections
             ctx.lineWidth = 1.5;
             ctx.setLineDash([3, 3]); // Dashed line to distinguish from collective connections
             
@@ -2213,7 +2223,7 @@
             
             ctx.save();
             ctx.globalAlpha = 0.7;
-            ctx.strokeStyle = '#00d4ff'; // Cyan for correlation connections
+            ctx.strokeStyle = '#059669'; // Green for correlation connections
             ctx.lineWidth = 2;
             ctx.setLineDash([5, 3]); // Dotted line to distinguish from other connections
             
@@ -2321,33 +2331,37 @@
             const color = EVENT_COLORS[event.type] || EVENT_COLORS['Unknown'];
             
             // Determine stroke style based on hover/highlight state
-            let strokeStyle = '#fff';
+            let strokeStyle = '#333';
             let lineWidth = 1;
             if (isHighlighted) {
-                strokeStyle = '#9cdcfe'; // Light blue for highlighted
+                strokeStyle = '#1565c0'; // Blue for highlighted
                 lineWidth = 3;
             } else if (isHovered) {
-                strokeStyle = '#dcdcaa'; // Yellow for hovered
+                strokeStyle = '#ca8a04'; // Amber for hovered
                 lineWidth = 2;
             }
             
             let startX, endX;
             
             if (event.start !== null && event.stop !== null) {
-                // 1. FULL BAR - both start and end exist
-                startX = timeToX(event.start);
-                endX = timeToX(event.stop);
-                const width = endX - startX;
+                // 1. FULL BAR - both start and end exist (clamp left to label column so label stays readable)
+                startX = Math.max(LABEL_WIDTH, timeToX(event.start));
+                // ProfilerLifecycle events are 0µs in the trace; draw them as 1µs so the bar is visible but proportional
+                const stopTime = (event.type === 'ProfilerLifecycle' && event.start === event.stop)
+                    ? event.start + 1
+                    : event.stop;
+                endX = timeToX(stopTime);
+                const width = Math.max(0, endX - startX);
                 
                 ctx.fillStyle = color;
-                ctx.fillRect(startX, centerY - height/2, width, height);
+                if (width > 0) ctx.fillRect(startX, centerY - height/2, width, height);
                 ctx.strokeStyle = strokeStyle;
                 ctx.lineWidth = lineWidth;
-                ctx.strokeRect(startX, centerY - height/2, width, height);
+                if (width > 0) ctx.strokeRect(startX, centerY - height/2, width, height);
                 
                 // Draw label if space allows
                 if (width > 50) {
-                    ctx.fillStyle = '#fff';
+                    ctx.fillStyle = '#1f2937';
                     ctx.font = '10px monospace';
                     let label = event.func || event.type;
                     // For CUPTI activities, show kernel name or activity type
@@ -2367,7 +2381,7 @@
                 }
             } else if (event.start !== null) {
                 // 2. RIGHT-POINTING TRIANGLE (only start exists)
-                startX = timeToX(event.start);
+                startX = Math.max(LABEL_WIDTH, timeToX(event.start));
                 endX = startX + height;
                 
                 ctx.fillStyle = color;
@@ -2383,7 +2397,7 @@
             } else if (event.stop !== null) {
                 // 3. LEFT-POINTING TRIANGLE (only stop exists)
                 endX = timeToX(event.stop);
-                startX = endX - height;
+                startX = Math.max(LABEL_WIDTH, endX - height);
                 
                 ctx.fillStyle = color;
                 ctx.beginPath();
@@ -2399,7 +2413,7 @@
                 // 4. CIRCLE/DOT (no start or stop - use first state timestamp or default)
                 const hasStates = event.states && event.states.length > 0;
                 const firstState = hasStates ? event.states[0].timestamp : minTime;
-                startX = timeToX(firstState);
+                startX = Math.max(LABEL_WIDTH, timeToX(firstState));
                 endX = startX + height;
                 
                 // Draw as a small circle/dot
@@ -2416,14 +2430,14 @@
             const stateBounds = [];
             if (event.states) {
             event.states.forEach((state, stateIdx) => {
-                const stateX = timeToX(state.timestamp);
+                const stateX = Math.max(LABEL_WIDTH, timeToX(state.timestamp));
                 const isStateHighlighted = highlightedStateIdx === stateIdx;
                 
                 // Determine stroke style for highlighted state
-                let stateStrokeStyle = '#fff';
+                let stateStrokeStyle = '#333';
                 let stateLineWidth = 1;
                 if (isStateHighlighted) {
-                    stateStrokeStyle = '#9cdcfe'; // Light blue for highlighted
+                    stateStrokeStyle = '#1565c0'; // Blue for highlighted
                     stateLineWidth = 3;
                 }
                 
@@ -2456,7 +2470,7 @@
                     const bubbleSize = isStateHighlighted ? 10 : 8; // Slightly larger when highlighted
                     const bubbleY = centerY - bubbleSize;
                     
-                    ctx.fillStyle = '#ff6b6b';
+                    ctx.fillStyle = '#b91c1c';
                     ctx.beginPath();
                     // Bubble body
                     ctx.arc(stateX, bubbleY, bubbleSize, 0, Math.PI * 2);
@@ -2485,7 +2499,7 @@
                     // 5b. SMALL CIRCLE - State within event bounds (marker on top of bar)
                     const markerY = centerY - height/2 - 5;
                     const markerRadius = isStateHighlighted ? 5 : 3; // Larger when highlighted
-                    ctx.fillStyle = '#ff6b6b';
+                    ctx.fillStyle = '#b91c1c';
                     ctx.beginPath();
                     ctx.arc(stateX, markerY, markerRadius, 0, Math.PI * 2);
                     ctx.fill();
@@ -2574,27 +2588,32 @@
             const containerHeight = Math.max(400, lanes.length * laneHeight + 100);
             canvas.width = canvasWidth;
             canvas.height = containerHeight;
+            timelineContentWidth = Math.max(1, canvas.width - LABEL_WIDTH);
             
             // Clear canvas
-            ctx.fillStyle = '#1e1e1e';
+            ctx.fillStyle = '#ffffff';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
-            // Draw time axis
-            ctx.strokeStyle = '#555';
+            // Draw time axis (content area only, so labels stay readable)
+            ctx.strokeStyle = '#999';
             ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.moveTo(0, 20);
+            ctx.moveTo(LABEL_WIDTH, 20);
             ctx.lineTo(canvas.width, 20);
             ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(LABEL_WIDTH, 0);
+            ctx.lineTo(LABEL_WIDTH, 20);
+            ctx.stroke();
             
-            // Draw time labels
-            ctx.fillStyle = '#858585';
+            // Draw time labels in content area only
+            ctx.fillStyle = '#555555';
             ctx.font = '12px monospace';
             const numLabels = 10;
             for (let i = 0; i <= numLabels; i++) {
                 const time = minTime + (maxTime - minTime) * (i / numLabels);
-                const x = (i / numLabels) * canvas.width + panX;
-                if (x >= 0 && x <= canvas.width) {
+                const x = LABEL_WIDTH + (i / numLabels) * timelineContentWidth + panX;
+                if (x >= LABEL_WIDTH && x <= canvas.width) {
                     ctx.fillText(`${time.toFixed(0)}μs`, x, 15);
                     ctx.beginPath();
                     ctx.moveTo(x, 20);
@@ -2603,17 +2622,39 @@
                 }
             }
             
+            // Lane background colors for alternating by context (NCCL: comm+ctx; CUPTI: device+type)
+            const LANE_BG_A = '#f0f0f0';
+            const LANE_BG_B = '#e5e5e5';
+            let prevContextKey = null;
+            let useAltLaneBg = false;
+            
             // First pass: Draw events and calculate bounds (needed for arrow drawing)
             lanes.forEach((laneEvents, laneIndex) => {
                 const y = 40 + laneIndex * laneHeight;
                 
-                // Draw lane background
-                ctx.fillStyle = '#252526';
+                // Alternating lane background by context/group
+                if (laneEvents.length > 0) {
+                    const first = laneEvents[0][1];
+                    const contextKey = first.isCuptiActivity
+                        ? (first.gpuUuid ? `cupti_u${first.gpuUuid}_${first.type || 'Other'}` : `cupti_d${first.deviceId ?? '?'}_${first.type || 'Other'}`)
+                        : `${first.commid || 'unknown'}_${first.ctx ?? ''}`;
+                    if (contextKey !== prevContextKey) {
+                        prevContextKey = contextKey;
+                        useAltLaneBg = !useAltLaneBg;
+                    }
+                }
+                ctx.fillStyle = useAltLaneBg ? LANE_BG_B : LANE_BG_A;
                 ctx.fillRect(0, y, canvas.width, laneHeight);
                 
-                // Draw lane separator
-                ctx.strokeStyle = '#333';
+                // Vertical separator between label column and timeline content
+                ctx.strokeStyle = '#bbb';
                 ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(LABEL_WIDTH, y);
+                ctx.lineTo(LABEL_WIDTH, y + laneHeight);
+                ctx.stroke();
+                
+                // Draw lane separator
                 ctx.beginPath();
                 ctx.moveTo(0, y + laneHeight);
                 ctx.lineTo(canvas.width, y + laneHeight);
@@ -2634,11 +2675,11 @@
                     
                     // Check if this is a CUPTI activity lane
                     if (firstEvent.isCuptiActivity) {
-                        // CUPTI activity lane label
-                        const deviceId = firstEvent.deviceId !== null && firstEvent.deviceId !== undefined 
-                            ? firstEvent.deviceId : '?';
-                        const activityType = firstEvent.type_name || firstEvent.type || 'Unknown';
-                        label = `CUPTI | Device ${deviceId} | ${activityType}`;
+                        // CUPTI activity lane label: prefer GPU UUID when available (short form for display)
+                        const gpuLabel = firstEvent.gpuUuid
+                            ? 'gpuUuid=' + (firstEvent.gpuUuid.length > 12 ? '...' + firstEvent.gpuUuid.slice(-8) : firstEvent.gpuUuid)
+                            : `Device ${firstEvent.deviceId !== null && firstEvent.deviceId !== undefined ? firstEvent.deviceId : '?'}`;
+                        label = `CUPTI | ${gpuLabel}`;
                         if (tids.size === 1) {
                             label += ` | tid=${Array.from(tids)[0]}`;
                         } else if (tids.size > 1) {
@@ -2689,9 +2730,15 @@
                         label += ` | ${laneEvents.length} events`;
                     }
                     
-                    ctx.fillStyle = '#858585';
+                    // Draw lane label in reserved column (clip so it never spills into content area)
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.rect(0, y, LABEL_WIDTH - 6, laneHeight);
+                    ctx.clip();
+                    ctx.fillStyle = '#555555';
                     ctx.font = '11px monospace';
                     ctx.fillText(label, 10, y + laneHeight / 2 + 4);
+                    ctx.restore();
                 }
                 
                 // Draw events in this lane and store bounds
@@ -2750,22 +2797,21 @@
                 drawCorrelationConnections(renderedEventsMap, renderedActivitiesMap, eventToLane, activityToLane);
             }
             
-            // Draw selection rectangle if selecting
+            // Draw selection rectangle if selecting (content area only)
             if (isSelecting) {
-                const selStartX = Math.min(selectionStartX, selectionEndX);
-                const selEndX = Math.max(selectionStartX, selectionEndX);
-                const selWidth = selEndX - selStartX;
+                const selStartX = Math.max(LABEL_WIDTH, Math.min(selectionStartX, selectionEndX));
+                const selEndX = Math.min(canvas.width, Math.max(selectionStartX, selectionEndX));
+                const selWidth = Math.max(0, selEndX - selStartX);
                 
-                // Draw semi-transparent selection rectangle
-                ctx.fillStyle = 'rgba(156, 220, 254, 0.2)'; // Semi-transparent light blue
-                ctx.fillRect(selStartX, 0, selWidth, canvas.height);
-                
-                // Draw selection border
-                ctx.strokeStyle = '#9cdcfe';
-                ctx.lineWidth = 2;
-                ctx.setLineDash([5, 5]);
-                ctx.strokeRect(selStartX, 0, selWidth, canvas.height);
-                ctx.setLineDash([]);
+                if (selWidth > 0) {
+                    ctx.fillStyle = 'rgba(21, 101, 192, 0.15)'; // Semi-transparent blue
+                    ctx.fillRect(selStartX, 0, selWidth, canvas.height);
+                    ctx.strokeStyle = '#1565c0';
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([5, 5]);
+                    ctx.strokeRect(selStartX, 0, selWidth, canvas.height);
+                    ctx.setLineDash([]);
+                }
             }
             
             // Setup mouse interaction
@@ -2834,8 +2880,8 @@
                     highlightedStateKey = null;
                     highlightedStateIndex = null;
                     isSelecting = true;
-                    selectionStartX = mouseDownX;
-                    selectionEndX = mouseDownX;
+                    selectionStartX = Math.max(LABEL_WIDTH, mouseDownX);
+                    selectionEndX = selectionStartX;
                     renderTimeline(); // Re-render to clear highlight
                 }
             });
@@ -2846,10 +2892,8 @@
                 const mouseY = e.clientY - rect.top;
                 
                 if (isSelecting) {
-                    // Update selection end position
-                    selectionEndX = mouseX;
-                    // Clamp to canvas bounds
-                    selectionEndX = Math.max(0, Math.min(canvas.width, selectionEndX));
+                    // Update selection end position (clamp to content area)
+                    selectionEndX = Math.max(LABEL_WIDTH, Math.min(canvas.width, mouseX));
                     // Redraw to show updated selection
                     renderTimeline();
                     return;
@@ -2939,11 +2983,11 @@
                 if (isSelecting) {
                     const rect = canvas.getBoundingClientRect();
                     const mouseX = e.clientX - rect.left;
-                    selectionEndX = Math.max(0, Math.min(canvas.width, mouseX));
+                    selectionEndX = Math.max(LABEL_WIDTH, Math.min(canvas.width, mouseX));
                     
-                    // Calculate time range from selection
-                    const selStartX = Math.min(selectionStartX, selectionEndX);
-                    const selEndX = Math.max(selectionStartX, selectionEndX);
+                    // Calculate time range from selection (use content-area coordinates)
+                    const selStartX = Math.max(LABEL_WIDTH, Math.min(selectionStartX, selectionEndX));
+                    const selEndX = Math.min(canvas.width, Math.max(selectionStartX, selectionEndX));
                     
                     // Only apply if selection is meaningful (at least 10 pixels wide)
                     if (selEndX - selStartX > 10) {
@@ -3015,7 +3059,7 @@
             
             // If hovering over a specific state, show that state's info prominently
             if (hoveredState) {
-                lines.push('<strong style="color: #ff6b6b;">State Transition (Hovered)</strong>');
+                lines.push('<strong style="color: #b91c1c;">State Transition (Hovered)</strong>');
                 lines.push(`State Name: ${hoveredState.state_name || 'Unknown'}`);
                 lines.push(`State ID: ${hoveredState.state_id || 'N/A'}`);
                 if (hoveredState.tid !== undefined && hoveredState.tid !== null) {
@@ -3045,7 +3089,7 @@
             // Check if this is a CUPTI activity
             if (event.isCuptiActivity) {
                 // CUPTI Activity Information
-                lines.push(`<strong style="color: #00d4ff;">CUPTI Activity</strong>`);
+                lines.push(`<strong style="color: #059669;">CUPTI Activity</strong>`);
                 lines.push(`Activity Type: ${event.type_name || event.type || 'Unknown'}`);
                 
                 if (event.name) {
@@ -3072,8 +3116,8 @@
                 // Process and thread IDs
                 if (event.start_pid !== undefined && event.start_pid !== null) {
                     if (event.stop_pid !== undefined && event.stop_pid !== null && event.start_pid !== event.stop_pid) {
-                        lines.push(`<strong style="color: #f48771;">Start Process ID: ${event.start_pid}</strong>`);
-                        lines.push(`<strong style="color: #f48771;">Stop Process ID: ${event.stop_pid}</strong> (different process!)`);
+                        lines.push(`<strong style="color: #dc2626;">Start Process ID: ${event.start_pid}</strong>`);
+                        lines.push(`<strong style="color: #dc2626;">Stop Process ID: ${event.stop_pid}</strong> (different process!)`);
                     } else {
                         lines.push(`Process ID: ${event.start_pid}`);
                     }
@@ -3081,15 +3125,35 @@
                 
                 if (event.start_tid !== undefined && event.start_tid !== null) {
                     if (event.stop_tid !== undefined && event.stop_tid !== null && event.start_tid !== event.stop_tid) {
-                        lines.push(`<strong style="color: #f48771;">Start Thread ID: ${event.start_tid}</strong>`);
-                        lines.push(`<strong style="color: #f48771;">Stop Thread ID: ${event.stop_tid}</strong> (different thread!)`);
+                        lines.push(`<strong style="color: #dc2626;">Start Thread ID: ${event.start_tid}</strong>`);
+                        lines.push(`<strong style="color: #dc2626;">Stop Thread ID: ${event.stop_tid}</strong> (different thread!)`);
                     } else {
                         lines.push(`Thread ID: ${event.start_tid}`);
                     }
                 }
                 
+                // Timestamps
+                if (event.start !== null && event.start !== undefined) {
+                    lines.push(`Start Time: ${event.start.toFixed(3)}μs`);
+                }
+                if (event.stop !== null && event.stop !== undefined) {
+                    lines.push(`Stop Time: ${event.stop.toFixed(3)}μs`);
+                }
+                if (event.start !== null && event.start !== undefined && event.stop !== null && event.stop !== undefined) {
+                    const calculatedDuration = event.stop - event.start;
+                    lines.push(`Duration: ${calculatedDuration.toFixed(3)}μs (${(calculatedDuration / 1000).toFixed(3)}ms)`);
+                    // Also show stored duration if it exists and differs significantly
+                    if (event.duration !== null && event.duration !== undefined && 
+                        Math.abs(event.duration - calculatedDuration) > 0.001) {
+                        lines.push(`  (Stored duration: ${event.duration.toFixed(3)}μs)`);
+                    }
+                } else if (event.duration !== null && event.duration !== undefined) {
+                    // Show stored duration if start/stop are missing
+                    lines.push(`Duration: ${event.duration.toFixed(3)}μs (${(event.duration / 1000).toFixed(3)}ms) [from stored field]`);
+                }
+                
                 if (event.extCorrId !== null && event.extCorrId !== undefined) {
-                    lines.push(`<strong style="color: #00d4ff;">External Correlation ID: ${event.extCorrId}</strong>`);
+                    lines.push(`<strong style="color: #059669;">External Correlation ID: ${event.extCorrId}</strong>`);
                 }
                 
                 if (event.corrId !== null && event.corrId !== undefined) {
@@ -3118,7 +3182,7 @@
                     const correlatedEvents = eventsData.extCorrIdToNcclEvents.get(correlationKey) || [];
                     if (correlatedEvents.length > 0) {
                         lines.push('');
-                        lines.push(`<strong style="color: #00d4ff;">Correlated NCCL Events (${correlatedEvents.length}):</strong>`);
+                        lines.push(`<strong style="color: #059669;">Correlated NCCL Events (${correlatedEvents.length}):</strong>`);
                         correlatedEvents.forEach((ncclKey, idx) => {
                             const ncclEvent = eventsData.events[ncclKey];
                             if (ncclEvent) {
@@ -3157,7 +3221,7 @@
                 
                 // Show correlation ID if present
                 if (event.extCorrId !== null && event.extCorrId !== undefined) {
-                    lines.push(`<strong style="color: #00d4ff;">External Correlation ID: ${event.extCorrId}</strong>`);
+                    lines.push(`<strong style="color: #059669;">External Correlation ID: ${event.extCorrId}</strong>`);
                 }
                 
                 // Show correlated CUPTI activities (using composite key with PID)
@@ -3169,7 +3233,7 @@
                     const correlatedActivities = eventsData.extCorrIdToCuptiActivities.get(correlationKey) || [];
                     if (correlatedActivities.length > 0) {
                         lines.push('');
-                        lines.push(`<strong style="color: #00d4ff;">Correlated CUPTI Activities (${correlatedActivities.length}):</strong>`);
+                        lines.push(`<strong style="color: #059669;">Correlated CUPTI Activities (${correlatedActivities.length}):</strong>`);
                         correlatedActivities.forEach((activityKey, idx) => {
                             const activity = eventsData.cuptiActivities[activityKey];
                             if (activity) {
@@ -3192,7 +3256,7 @@
                 // Show commid with shortened display
                 const shortId = event.commid.length > 12 ? '...' + event.commid.slice(-12) : event.commid;
                 const commIdx = eventsData.commids ? eventsData.commids.indexOf(event.commid) + 1 : '?';
-                lines.push(`<strong style="color: #dcdcaa;">Communicator #${commIdx}</strong> (${shortId})`);
+                lines.push(`<strong style="color: #ca8a04;">Communicator #${commIdx}</strong> (${shortId})`);
             }
             if (event.ctx) {
                 lines.push(`Context: ${event.ctx}`);
@@ -3205,7 +3269,7 @@
             
             // PXN (Proxy Network) information
             if (event.isPxn) {
-                lines.push(`<strong style="color: #f48771;">PXN Event</strong>`);
+                lines.push(`<strong style="color: #dc2626;">PXN Event</strong>`);
                 if (event.myPid !== undefined && event.myPid !== null) {
                     lines.push(`  My PID: ${event.myPid}`);
                 }
@@ -3218,8 +3282,8 @@
             if (event.start_tid !== undefined && event.start_tid !== null) {
                 if (event.stop_tid !== undefined && event.stop_tid !== null && event.start_tid !== event.stop_tid) {
                     // Different threads for start and stop - highlight this!
-                    lines.push(`<strong style="color: #f48771;">Start Thread ID: ${event.start_tid}</strong>`);
-                    lines.push(`<strong style="color: #f48771;">Stop Thread ID: ${event.stop_tid}</strong> (different thread!)`);
+                    lines.push(`<strong style="color: #dc2626;">Start Thread ID: ${event.start_tid}</strong>`);
+                    lines.push(`<strong style="color: #dc2626;">Stop Thread ID: ${event.stop_tid}</strong> (different thread!)`);
                 } else {
                     lines.push(`Thread ID: ${event.start_tid}`);
                 }
@@ -3231,8 +3295,8 @@
             if (event.start_pid !== undefined && event.start_pid !== null) {
                 if (event.stop_pid !== undefined && event.stop_pid !== null && event.start_pid !== event.stop_pid) {
                     // Different processes for start and stop - highlight this!
-                    lines.push(`<strong style="color: #f48771;">Start Process ID: ${event.start_pid}</strong>`);
-                    lines.push(`<strong style="color: #f48771;">Stop Process ID: ${event.stop_pid}</strong> (different process!)`);
+                    lines.push(`<strong style="color: #dc2626;">Start Process ID: ${event.start_pid}</strong>`);
+                    lines.push(`<strong style="color: #dc2626;">Stop Process ID: ${event.stop_pid}</strong> (different process!)`);
                 } else {
                     lines.push(`Process ID: ${event.start_pid}`);
                 }
@@ -3288,7 +3352,7 @@
                 const parentEvent = eventsData.events[parentId];
                 if (parentEvent) {
                     lines.push('');
-                    lines.push('<strong style="color: #4ec9b0;">Parent Event:</strong>');
+                    lines.push('<strong style="color: #0d9488;">Parent Event:</strong>');
                     lines.push(`  Type: ${parentEvent.type_name || parentEvent.type || 'Unknown'}`);
                     if (parentEvent.func) {
                         lines.push(`  Function: ${parentEvent.func}`);
@@ -3303,7 +3367,7 @@
             if (eventsData.parent_child_map && eventsData.parent_child_map[event._key]) {
                 const children = eventsData.parent_child_map[event._key];
                 lines.push('');
-                lines.push(`<strong style="color: #4ec9b0;">Child Events (${children.length}):</strong>`);
+                lines.push(`<strong style="color: #0d9488;">Child Events (${children.length}):</strong>`);
                 children.forEach((childId, idx) => {
                     const childEvent = eventsData.events[childId];
                     if (childEvent) {
@@ -3323,7 +3387,7 @@
                 event.states.forEach((state, idx) => {
                     const isHovered = hoveredState && state.timestamp === hoveredState.timestamp && 
                                      state.state_name === hoveredState.state_name;
-                    const prefix = isHovered ? '<strong style="color: #ff6b6b;">→' : '  [';
+                    const prefix = isHovered ? '<strong style="color: #b91c1c;">→' : '  [';
                     const suffix = isHovered ? '</strong>' : ']';
                     const tidInfo = state.tid !== undefined && state.tid !== null ? ` tid=${state.tid}` : '';
                     const pidInfo = state.pid !== undefined && state.pid !== null ? ` pid=${state.pid}` : '';
