@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.28 (TeX Live 2025) (preloaded format=pdflatex 2026.1.30)  7 FEB 2026 17:44
+This is pdfTeX, Version 3.141592653-2.6-1.40.28 (TeX Live 2025) (preloaded format=pdflatex 2026.1.30)  9 FEB 2026 12:03
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -301,6 +301,9 @@ Package graphics Info: Driver file: pdftex.def on input line 106.
 )
 \Gin@req@height=\dimen175
 \Gin@req@width=\dimen176
+) (c:/a/texlive/2025/texmf-dist/tex/latex/grffile/grffile.sty
+Package: grffile 2019/11/11 v2.1 Extended file name support for graphics (legacy)
+Package grffile Info: This package is an empty stub for compatibility on input line 40.
 ) (c:/a/texlive/2025/texmf-dist/tex/latex/float/float.sty
 Package: float 2001/11/08 v1.3d Float enhancements (AL)
 \c@float@type=\count320
@@ -520,24 +523,24 @@ File: l3backend-pdftex.def 2025-10-09 L3 backend support: PDF output (pdfTeX)
 ) (./uni_nccl_report.aux)
 \openout1 = `uni_nccl_report.aux'.
 
-LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 47.
-LaTeX Font Info:    ... okay on input line 47.
-LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 47.
-LaTeX Font Info:    ... okay on input line 47.
-LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 47.
-LaTeX Font Info:    ... okay on input line 47.
-LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 47.
-LaTeX Font Info:    ... okay on input line 47.
-LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 47.
-LaTeX Font Info:    ... okay on input line 47.
-LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 47.
-LaTeX Font Info:    ... okay on input line 47.
-LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 47.
-LaTeX Font Info:    ... okay on input line 47.
-LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 47.
-LaTeX Font Info:    ... okay on input line 47.
-LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 47.
-LaTeX Font Info:    ... okay on input line 47.
+LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
+LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 48.
+LaTeX Font Info:    ... okay on input line 48.
 
 *geometry* driver: auto-detecting
 *geometry* detected driver: pdftex
@@ -593,7 +596,7 @@ Package epstopdf-base Info: Redefining graphics rule for `.eps' on input line 48
  (c:/a/texlive/2025/texmf-dist/tex/latex/latexconfig/epstopdf-sys.cfg
 File: epstopdf-sys.cfg 2010/07/13 v1.3 Configuration of (r)epstopdf for TeX Live
 ))
-Package hyperref Info: Link coloring OFF on input line 47.
+Package hyperref Info: Link coloring OFF on input line 48.
  (./uni_nccl_report.out) (./uni_nccl_report.out)
 \@outlinefile=\write4
 \openout4 = `uni_nccl_report.out'.
@@ -613,62 +616,164 @@ File: lstmisc.sty 2025/11/14 1.11b (Carsten Heinz)
 \pgf@layerboxsaved@umlsd@background=\box72
 \pgf@layerbox@umlsd@threadlayer=\box73
 \pgf@layerboxsaved@umlsd@threadlayer=\box74
- [4
+
+Overfull \hbox (4.3557pt too wide) in paragraph at lines 231--235
+[]\T1/cmr/m/n/10.95 The guards \T1/cmtt/m/n/10.95 if (proxyState->refCount == 1) \T1/cmr/m/n/10.95 and \T1/cmtt/m/n/10.95 if (!state->thread) \T1/cmr/m/n/10.95 en-sure that these threads
+ []
+
+[4] [5
 pdfTeX warning (ext4): destination with the same identifier (name{figure.1}) has been already used, duplicate ignored
 <argument> ...shipout:D \box_use:N \l_shipout_box 
                                                   \__shipout_drop_firstpage_...
-l.229 
-      ] [5] [6
+l.259 struct 
+             ncclProxyOpsPool {] [6
 pdfTeX warning (ext4): destination with the same identifier (name{figure.2}) has been already used, duplicate ignored
 <argument> ...shipout:D \box_use:N \l_shipout_box 
                                                   \__shipout_drop_firstpage_...
-l.454 \section
-              {The Profiler API}
+l.407 
+      ] [7
 pdfTeX warning (ext4): destination with the same identifier (name{figure.3}) has been already used, duplicate ignored
 <argument> ...shipout:D \box_use:N \l_shipout_box 
                                                   \__shipout_drop_firstpage_...
-l.454 \section
-              {The Profiler API}] [7] [8
+l.491 
+      ] [8] [9
 pdfTeX warning (ext4): destination with the same identifier (name{figure.4}) has been already used, duplicate ignored
 <argument> ...shipout:D \box_use:N \l_shipout_box 
                                                   \__shipout_drop_firstpage_...
-l.595   ncclResult_t 
-                     (*finalize)(...);          // before unloading the plugin] [9] [10] [11] [12
+l.603   ncclResult_t 
+                     (*finalize)(...);          // before unloading the plugin] [10] [11] [12] [13
 pdfTeX warning (ext4): destination with the same identifier (name{figure.5}) has been already used, duplicate ignored
 <argument> ...shipout:D \box_use:N \l_shipout_box 
                                                   \__shipout_drop_firstpage_...
-l.979 
-      ] [13
+l.987 
+      ] [14
 pdfTeX warning (ext4): destination with the same identifier (name{figure.6}) has been already used, duplicate ignored
 <argument> ...shipout:D \box_use:N \l_shipout_box 
                                                   \__shipout_drop_firstpage_...
-l.1000 \begin{lstlisting}[language=C]
-                                     ] [14
+l.1008 \begin{lstlisting}[language=C]
+                                     ] [15
 pdfTeX warning (ext4): destination with the same identifier (name{figure.7}) has been already used, duplicate ignored
 <argument> ...shipout:D \box_use:N \l_shipout_box 
                                                   \__shipout_drop_firstpage_...
-l.1079 
-       ] [15] [16] [17] [18] [19] [20] (./uni_nccl_report.aux)
+l.1087 
+       ] [16]
+<images/03_communicators_01_allreduce/finalize.png, id=418, 1143.67274pt x 446.26724pt>
+File: images/03_communicators_01_allreduce/finalize.png Graphic file (type png)
+<use images/03_communicators_01_allreduce/finalize.png>
+Package pdftex.def Info: images/03_communicators_01_allreduce/finalize.png  used on input line 1180.
+(pdftex.def)             Requested size: 469.75502pt x 183.2976pt.
+ [17]
+<images/03_communicators_01_allreduce/zoomed in.png, id=447, 1143.67274pt x 287.27325pt>
+File: images/03_communicators_01_allreduce/zoomed in.png Graphic file (type png)
+<use images/03_communicators_01_allreduce/zoomed in.png>
+Package pdftex.def Info: images/03_communicators_01_allreduce/zoomed in.png  used on input line 1188.
+(pdftex.def)             Requested size: 469.75502pt x 117.9932pt.
+<images/03_communicators_01_allreduce/zoomed in 2 combined.png, id=448, 1121.99174pt x 1324.34775pt>
+File: images/03_communicators_01_allreduce/zoomed in 2 combined.png Graphic file (type png)
+<use images/03_communicators_01_allreduce/zoomed in 2 combined.png>
+Package pdftex.def Info: images/03_communicators_01_allreduce/zoomed in 2 combined.png  used on input line 1196.
+(pdftex.def)             Requested size: 469.75502pt x 554.48439pt.
+ [18
+pdfTeX warning (ext4): destination with the same identifier (name{figure.8}) has been already used, duplicate ignored
+<argument> ...shipout:D \box_use:N \l_shipout_box 
+                                                  \__shipout_drop_firstpage_...
+l.1200 
+       
+pdfTeX warning (ext4): destination with the same identifier (name{figure.9}) has been already used, duplicate ignored
+<argument> ...shipout:D \box_use:N \l_shipout_box 
+                                                  \__shipout_drop_firstpage_...
+l.1200 
+        <./images/03_communicators_01_allreduce/finalize.png> <./images/03_communicators_01_allreduce/zoomed in.png>] [19
+pdfTeX warning (ext4): destination with the same identifier (name{figure.10}) has been already used, duplicate ignored
+<argument> ...shipout:D \box_use:N \l_shipout_box 
+                                                  \__shipout_drop_firstpage_...
+l.1208 T
+        ODO run this code (or a modified version with one additional warmup ... <./images/03_communicators_01_allreduce/zoomed in 2 combined.png>]
+<images/multi_gpu_single_thread/start to end - allreduce - 4 different threads + 4 proxy threads.png, id=464, 1117.17375pt x 594.42075pt>
+File: images/multi_gpu_single_thread/start to end - allreduce - 4 different threads + 4 proxy threads.png Graphic file (type png)
+<use images/multi_gpu_single_thread/start to end - allreduce - 4 different threads + 4 proxy threads.png>
+Package pdftex.def Info: images/multi_gpu_single_thread/start to end - allreduce - 4 different threads + 4 proxy threads.png  used on input line 1217.
+(pdftex.def)             Requested size: 469.75502pt x 249.94525pt.
+<images/multi_gpu_single_thread/show proxystep.png, id=465, 1138.2525pt x 652.23676pt>
+File: images/multi_gpu_single_thread/show proxystep.png Graphic file (type png)
+<use images/multi_gpu_single_thread/show proxystep.png>
+Package pdftex.def Info: images/multi_gpu_single_thread/show proxystep.png  used on input line 1224.
+(pdftex.def)             Requested size: 469.75502pt x 269.18036pt.
+ [20
+pdfTeX warning (ext4): destination with the same identifier (name{figure.11}) has been already used, duplicate ignored
+<argument> ...shipout:D \box_use:N \l_shipout_box 
+                                                  \__shipout_drop_firstpage_...
+l.1228 
+        <./images/multi_gpu_single_thread/start to end - allreduce - 4 different threads + 4 proxy threads.png>]
+<images/multi_gpu_single_thread/no_arrows - no_same_lane - show proxystep combined.png, id=472, 1055.74425pt x 1012.38225pt>
+File: images/multi_gpu_single_thread/no_arrows - no_same_lane - show proxystep combined.png Graphic file (type png)
+<use images/multi_gpu_single_thread/no_arrows - no_same_lane - show proxystep combined.png>
+Package pdftex.def Info: images/multi_gpu_single_thread/no_arrows - no_same_lane - show proxystep combined.png  used on input line 1231.
+(pdftex.def)             Requested size: 469.75502pt x 450.47006pt.
+ [21
+pdfTeX warning (ext4): destination with the same identifier (name{figure.12}) has been already used, duplicate ignored
+<argument> ...shipout:D \box_use:N \l_shipout_box 
+                                                  \__shipout_drop_firstpage_...
+l.1235 
+        <./images/multi_gpu_single_thread/show proxystep.png>]
+<images/multi_gpu_single_thread/finalize.png, id=479, 1131.0255pt x 591.4095pt>
+File: images/multi_gpu_single_thread/finalize.png Graphic file (type png)
+<use images/multi_gpu_single_thread/finalize.png>
+Package pdftex.def Info: images/multi_gpu_single_thread/finalize.png  used on input line 1238.
+(pdftex.def)             Requested size: 469.75502pt x 245.63792pt.
+ [22
+pdfTeX warning (ext4): destination with the same identifier (name{figure.13}) has been already used, duplicate ignored
+<argument> ...shipout:D \box_use:N \l_shipout_box 
+                                                  \__shipout_drop_firstpage_...
+l.1242 
+        <./images/multi_gpu_single_thread/no_arrows - no_same_lane - show proxystep combined.png>]
+<images/ncclGroup/grouped broadcast allreduce across different comms (all processes).png, id=486, 1143.67274pt x 944.93025pt>
+File: images/ncclGroup/grouped broadcast allreduce across different comms (all processes).png Graphic file (type png)
+<use images/ncclGroup/grouped broadcast allreduce across different comms (all processes).png>
+Package pdftex.def Info: images/ncclGroup/grouped broadcast allreduce across different comms (all processes).png  used on input line 1261.
+(pdftex.def)             Requested size: 469.75502pt x 388.116pt.
+ [23
+pdfTeX warning (ext4): destination with the same identifier (name{figure.14}) has been already used, duplicate ignored
+<argument> ...shipout:D \box_use:N \l_shipout_box 
+                                                  \__shipout_drop_firstpage_...
+l.1265 
+        <./images/multi_gpu_single_thread/finalize.png>]
+<images/ncclGroup/grouped broadcast allreduce across different comms same process.png, id=493, 1059.96pt x 433.01775pt>
+File: images/ncclGroup/grouped broadcast allreduce across different comms same process.png Graphic file (type png)
+<use images/ncclGroup/grouped broadcast allreduce across different comms same process.png>
+Package pdftex.def Info: images/ncclGroup/grouped broadcast allreduce across different comms same process.png  used on input line 1268.
+(pdftex.def)             Requested size: 469.75502pt x 191.90271pt.
+ [24
+pdfTeX warning (ext4): destination with the same identifier (name{figure.15}) has been already used, duplicate ignored
+<argument> ...shipout:D \box_use:N \l_shipout_box 
+                                                  \__shipout_drop_firstpage_...
+l.1272 
+        <./images/ncclgroup/grouped broadcast allreduce across different comms (all processes).png>] [25
+pdfTeX warning (ext4): destination with the same identifier (name{figure.16}) has been already used, duplicate ignored
+<argument> ...shipout:D \box_use:N \l_shipout_box 
+                                                  \__shipout_drop_firstpage_...
+l.1298 \end{quote}
+                   <./images/ncclgroup/grouped broadcast allreduce across different comms same process.png>] [26] [27] [28] [29] [30] [31] (./uni_nccl_report.aux)
  ***********
 LaTeX2e <2025-11-01>
 L3 programming layer <2026-01-19>
  ***********
 Package rerunfilecheck Info: File `uni_nccl_report.out' has not changed.
-(rerunfilecheck)             Checksum: 12F8EC84C52C390A484FAC9DD5AE117D;5176.
+(rerunfilecheck)             Checksum: F54010D2E2DFAD464E3AE2A0B8FF1ADC;6619.
  ) 
 Here is how much of TeX's memory you used:
- 25428 strings out of 467533
- 465951 string characters out of 5422626
- 1192748 words of memory out of 5000000
- 53713 multiletter control sequences out of 15000+600000
+ 25604 strings out of 467533
+ 473385 string characters out of 5422626
+ 1195393 words of memory out of 5000000
+ 53823 multiletter control sequences out of 15000+600000
  641713 words of font info for 72 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 84i,11n,94p,1069b,2092s stack positions out of 10000i,1000n,20000p,200000b,200000s
-<c:/a/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi8.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfbx1000.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfbx1095.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfbx1200.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfbx1440.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfrm1000.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfrm1095.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfrm1728.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sftt0900.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sftt1000.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sftt1095.pfb>
-Output written on uni_nccl_report.pdf (20 pages, 359437 bytes).
+ 84i,11n,94p,2146b,2092s stack positions out of 10000i,1000n,20000p,200000b,200000s
+<c:/a/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfbx1000.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfbx1095.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfbx1200.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfbx1440.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfrm1000.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfrm1095.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfrm1728.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sftt0900.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sftt1000.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sftt1095.pfb>
+Output written on uni_nccl_report.pdf (31 pages, 3977271 bytes).
 PDF statistics:
- 588 PDF objects out of 1000 (max. 8388607)
- 515 compressed objects within 6 object streams
- 241 named destinations out of 1000 (max. 500000)
- 317 words of extra memory for PDF output out of 10000 (max. 10000000)
+ 715 PDF objects out of 1000 (max. 8388607)
+ 618 compressed objects within 7 object streams
+ 303 named destinations out of 1000 (max. 500000)
+ 386 words of extra memory for PDF output out of 10000 (max. 10000000)
 

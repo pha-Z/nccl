@@ -1,27 +1,30 @@
 \babel@toc {english}{}\relax 
 \contentsline {section}{\numberline {1}TODO / Structure (from Markdown)}{2}{section.1}%
 \contentsline {subsection}{\numberline {1.1}Table of Contents}{2}{subsection.1.1}%
-\contentsline {subsection}{\numberline {1.2}Main content chunks / concepts}{2}{subsection.1.2}%
+\contentsline {subsection}{\numberline {1.2}Main content chunks / concepts}{3}{subsection.1.2}%
 \contentsline {section}{\numberline {2}Abstract}{3}{section.2}%
 \contentsline {section}{\numberline {3}About NCCL}{3}{section.3}%
 \contentsline {subsection}{\numberline {3.1}Comparison to MPI}{3}{subsection.3.1}%
 \contentsline {subsection}{\numberline {3.2}Relevant NCCL internals}{4}{subsection.3.2}%
 \contentsline {section}{\numberline {4}The Profiler API}{7}{section.4}%
 \contentsline {subsection}{\numberline {4.1}How NCCL detects the profiler plugin}{7}{subsection.4.1}%
-\contentsline {subsection}{\numberline {4.2}The profiler API definition}{8}{subsection.4.2}%
-\contentsline {subsubsection}{\numberline {4.2.1}init}{9}{subsubsection.4.2.1}%
-\contentsline {subsubsection}{\numberline {4.2.2}startEvent}{10}{subsubsection.4.2.2}%
-\contentsline {subsubsection}{\numberline {4.2.3}stopEvent}{11}{subsubsection.4.2.3}%
-\contentsline {subsubsection}{\numberline {4.2.4}recordEventState}{14}{subsubsection.4.2.4}%
-\contentsline {subsubsection}{\numberline {4.2.5}finalize}{14}{subsubsection.4.2.5}%
-\contentsline {subsubsection}{\numberline {4.2.6}name}{15}{subsubsection.4.2.6}%
-\contentsline {subsection}{\numberline {4.3}Code Examples}{15}{subsection.4.3}%
-\contentsline {subsubsection}{\numberline {4.3.1}single process multiple devices}{16}{subsubsection.4.3.1}%
-\contentsline {subsection}{\numberline {4.4}What is possible with the Profiler Plugin API? Considerations and Pitfalls for (logging, running metrics, CUPTI, \ldots ) when writing the plugin - section title WIP }{16}{subsection.4.4}%
-\contentsline {subsection}{\numberline {4.5}Performance and scalability of the Profiler Plugin API}{18}{subsection.4.5}%
-\contentsline {section}{\numberline {5}Potential Integration with Score-P}{19}{section.5}%
-\contentsline {section}{\numberline {6}Conclusion - What i have shown. Why would you use it? pros \& cons}{19}{section.6}%
-\contentsline {subsection}{\numberline {6.1}NCCL\_DEBUG}{20}{subsection.6.1}%
-\contentsline {subsection}{\numberline {6.2}Known limitations}{20}{subsection.6.2}%
-\contentsline {subsection}{\numberline {6.3}Summarize What i have shown TODO}{20}{subsection.6.3}%
-\contentsline {section}{\numberline {7}TODO}{20}{section.7}%
+\contentsline {subsection}{\numberline {4.2}The profiler API definition}{9}{subsection.4.2}%
+\contentsline {subsubsection}{\numberline {4.2.1}init}{10}{subsubsection.4.2.1}%
+\contentsline {subsubsection}{\numberline {4.2.2}startEvent}{11}{subsubsection.4.2.2}%
+\contentsline {subsubsection}{\numberline {4.2.3}stopEvent}{12}{subsubsection.4.2.3}%
+\contentsline {subsubsection}{\numberline {4.2.4}recordEventState}{15}{subsubsection.4.2.4}%
+\contentsline {subsubsection}{\numberline {4.2.5}finalize}{15}{subsubsection.4.2.5}%
+\contentsline {subsubsection}{\numberline {4.2.6}name}{16}{subsubsection.4.2.6}%
+\contentsline {subsection}{\numberline {4.3}Code Examples}{16}{subsection.4.3}%
+\contentsline {subsubsection}{\numberline {4.3.1}Single Process Multiple Devices}{17}{subsubsection.4.3.1}%
+\contentsline {subsubsection}{\numberline {4.3.2}Multiple Processes, Multiple Devices per Process, Multiple Threads per Process}{20}{subsubsection.4.3.2}%
+\contentsline {subsubsection}{\numberline {4.3.3}Multiple Processes, Multiple Devices per Process, Single Threads per Process \& using ncclGroup}{23}{subsubsection.4.3.3}%
+\contentsline {subsubsection}{\numberline {4.3.4}behavior when utilizing ncclGroup for collective operations}{23}{subsubsection.4.3.4}%
+\contentsline {subsection}{\numberline {4.4}What is possible with the Profiler Plugin API? Considerations and Pitfalls for (logging, running metrics, CUPTI, \ldots ) when writing the plugin - section title WIP }{25}{subsection.4.4}%
+\contentsline {subsection}{\numberline {4.5}Performance and scalability of the Profiler Plugin API}{27}{subsection.4.5}%
+\contentsline {section}{\numberline {5}Potential Integration with Score-P}{29}{section.5}%
+\contentsline {section}{\numberline {6}Conclusion - What i have shown. Why would you use it? pros \& cons}{30}{section.6}%
+\contentsline {subsection}{\numberline {6.1}NCCL\_DEBUG}{30}{subsection.6.1}%
+\contentsline {subsection}{\numberline {6.2}Known limitations}{30}{subsection.6.2}%
+\contentsline {subsection}{\numberline {6.3}Summarize What i have shown TODO}{30}{subsection.6.3}%
+\contentsline {section}{\numberline {7}TODO}{31}{section.7}%
