@@ -2401,6 +2401,9 @@
                 
                 // Build label text (always, for inside or outside bar)
                 let label = event.func || event.type;
+                if (!event.isCuptiActivity && event.type === 'CollApi') {
+                    label = (event.func || event.type) + ' API';
+                }
                 if (event.isCuptiActivity) {
                     if (event.name) {
                         label = event.name;
@@ -2665,28 +2668,42 @@
                 }
             }
             
-            // Lane background colors for alternating by context (NCCL: comm+ctx; CUPTI: device+type)
-            const LANE_BG_A = '#f0f0f0';
-            const LANE_BG_B = '#e5e5e5';
+            // Lane background: 4 tints – main pair (comm+rank or device+type) and intermediate pair (thread within same group)
+            const LANE_BG = ['#f0f0f0', '#e9e9e9', '#dbdbdb', '#e2e2e2', ]; // A, A', B', B
             let prevContextKey = null;
-            let useAltLaneBg = false;
+            let prevThreadKey = null;
+            let mainIndex = 0;   // 0 or 1, toggles when (comm+rank) or (device+type) changes
+            let threadAlt = 0;   // 0 or 1, toggles when thread changes within same context
             
             // First pass: Draw events and calculate bounds (needed for arrow drawing)
             lanes.forEach((laneEvents, laneIndex) => {
                 const y = 40 + laneIndex * laneHeight;
                 
-                // Alternating lane background by context/group
                 if (laneEvents.length > 0) {
                     const first = laneEvents[0][1];
                     const contextKey = first.isCuptiActivity
                         ? (first.gpuUuid ? `cupti_u${first.gpuUuid}_${first.type || 'Other'}` : `cupti_d${first.deviceId ?? '?'}_${first.type || 'Other'}`)
-                        : `${first.commid || 'unknown'}_${first.ctx ?? ''}`;
+                        : `${first.commid || 'unknown'}_rank${first.rank}`;
+                    const tids = new Set();
+                    laneEvents.forEach(([k, e]) => {
+                        if (e.start_tid !== undefined && e.start_tid !== null) tids.add(e.start_tid);
+                        if (e.stop_tid !== undefined && e.stop_tid !== null) tids.add(e.stop_tid);
+                    });
+                    const threadKey = tids.size === 0 ? '' : Array.from(tids).sort((a, b) => a - b).join(',');
                     if (contextKey !== prevContextKey) {
+                        if (prevContextKey !== null) mainIndex = 1 - mainIndex;
                         prevContextKey = contextKey;
-                        useAltLaneBg = !useAltLaneBg;
+                        prevThreadKey = threadKey;
+                        threadAlt = 0;
+                    } else if (threadKey !== prevThreadKey) {
+                        prevThreadKey = threadKey;
+                        threadAlt = 1 - threadAlt;
                     }
+                    const colorIndex = mainIndex * 2 + threadAlt;
+                    ctx.fillStyle = LANE_BG[colorIndex];
+                } else {
+                    ctx.fillStyle = LANE_BG[0];
                 }
-                ctx.fillStyle = useAltLaneBg ? LANE_BG_B : LANE_BG_A;
                 ctx.fillRect(0, y, canvas.width, laneHeight);
                 
                 // Vertical separator between label column and timeline content
@@ -3237,14 +3254,16 @@
             } else {
                 // NCCL Event Information
             // Event descriptor type (most important)
-            if (event.type_name) {
+            if (event.type === 'CollApi' && event.func) {
+                lines.push(`Event Type: ${event.func} API`);
+            } else if (event.type_name) {
                 lines.push(`Event Type: ${event.type_name}`);
             } else if (event.type) {
                 lines.push(`Event Type: ${event.type}`);
             }
             
-            // Function name
-            if (event.func) {
+            // Function name (skip if already shown as "X API" for CollApi)
+            if (event.func && !(event.type === 'CollApi')) {
                 lines.push(`Function: ${event.func}`);
             }
             
