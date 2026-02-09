@@ -46,7 +46,8 @@
         }
         
         .control-group > label:first-child {
-            font-size: 12px;
+            font-size: 14px;
+            font-weight: bold;
             color: #666666;
             height: 16px;
             line-height: 16px;
@@ -83,7 +84,8 @@
         }
         
         .control-group.checkbox-option label {
-            font-size: 12px;
+            font-size: 14px;
+            font-weight: bold;
             color: #333333;
             cursor: pointer;
         }
@@ -99,7 +101,8 @@
             border: 1px solid #999;
             cursor: pointer;
             user-select: none;
-            font-size: 11px;
+            font-size: 13px;
+            font-weight: bold;
             color: #333333;
             min-width: 40px;
             height: 24px;
@@ -120,7 +123,8 @@
             border: 1px solid #999;
             cursor: pointer;
             user-select: none;
-            font-size: 11px;
+            font-size: 13px;
+            font-weight: bold;
             height: 24px;
         }
         
@@ -145,7 +149,8 @@
         }
         
         label {
-            font-size: 12px;
+            font-size: 14px;
+            font-weight: bold;
             color: #666666;
         }
         
@@ -210,7 +215,8 @@
         }
         
         .legend-label {
-            font-size: 12px;
+            font-size: 14px;
+            font-weight: bold;
         }
         
         .visualization-elements {
@@ -248,7 +254,8 @@
         }
         
         .element-desc {
-            font-size: 12px;
+            font-size: 14px;
+            font-weight: bold;
             color: #333333;
             line-height: 1.4;
         }
@@ -262,7 +269,8 @@
             padding: 15px;
             border-radius: 5px;
             margin-top: 20px;
-            font-size: 12px;
+            font-size: 14px;
+            font-weight: bold;
             position: sticky;
             bottom: 0;
             z-index: 100;
@@ -468,7 +476,7 @@
             </div>
             <div style="margin-top: 20px; padding: 15px; background: #ffffff; border-radius: 5px; border: 1px solid #bbb;">
                 <h4 style="color: #ea580c; margin-bottom: 10px;">CUPTI Activity Colors</h4>
-                <div style="display: flex; gap: 20px; flex-wrap: wrap; font-size: 12px;">
+                <div style="display: flex; gap: 20px; flex-wrap: wrap; font-size: 14px; font-weight: bold;">
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <span style="width: 20px; height: 14px; background: #ea580c; border: 1px solid #999; border-radius: 2px; display: inline-block;"></span>
                         <span>CUDA Kernels</span>
@@ -489,7 +497,7 @@
             </div>
             <div style="margin-top: 20px; padding: 15px; background: #ffffff; border-radius: 5px; border: 1px solid #bbb;">
                 <h4 style="color: #0d9488; margin-bottom: 10px;">About ProfilerLifecycle Events</h4>
-                <div style="font-size: 12px; color: #333333; line-height: 1.6;">
+                <div style="font-size: 14px; font-weight: bold; color: #333333; line-height: 1.6;">
                     <p><strong>ProfilerLifecycle</strong> events represent the profiler plugin's tracking period for a communicator on a specific rank:</p>
                     <ul style="margin-left: 20px; margin-top: 8px;">
                         <li><strong>profilerInit:</strong> Called for each rank when the communicator is initialized on that rank (always corresponds to comm initialization on that rank)</li>
@@ -559,7 +567,7 @@
         let selectionEndX = 0;
         
         // Reserved width for lane labels (comm, rank, context, etc.) so event bars never overlap them
-        const LABEL_WIDTH = 350;
+        const LABEL_WIDTH = 230;
         let timelineContentWidth = 400; // Set each render: canvas.width - LABEL_WIDTH
         
         // Helper function to normalize a timestamp (subtract global_min_time)
@@ -2325,7 +2333,39 @@
          *       - Small red dot positioned above the event bar
          *       - Marks state transitions that occur during an event's lifetime
          */
-        function drawBar(event, lane, y, isHovered = false, isHighlighted = false, highlightedStateIdx = null) {
+        function getEventEndX(event) {
+            const height = laneHeight * 0.8;
+            if (event.start !== null && event.stop !== null) {
+                const stopTime = (event.type === 'ProfilerLifecycle' && event.start === event.stop)
+                    ? event.start + 1 : event.stop;
+                return timeToX(stopTime);
+            }
+            if (event.start !== null) {
+                return Math.max(LABEL_WIDTH, timeToX(event.start)) + height;
+            }
+            if (event.stop !== null) {
+                return timeToX(event.stop);
+            }
+            const hasStates = event.states && event.states.length > 0;
+            const firstState = hasStates ? event.states[0].timestamp : minTime;
+            return Math.max(LABEL_WIDTH, timeToX(firstState)) + height;
+        }
+        function getEventStartX(event) {
+            const height = laneHeight * 0.8;
+            if (event.start !== null && event.stop !== null) {
+                return Math.max(LABEL_WIDTH, timeToX(event.start));
+            }
+            if (event.start !== null) {
+                return Math.max(LABEL_WIDTH, timeToX(event.start));
+            }
+            if (event.stop !== null) {
+                return Math.max(LABEL_WIDTH, timeToX(event.stop) - height);
+            }
+            const hasStates = event.states && event.states.length > 0;
+            const firstState = hasStates ? event.states[0].timestamp : minTime;
+            return Math.max(LABEL_WIDTH, timeToX(firstState));
+        }
+        function drawBar(event, lane, y, isHovered = false, isHighlighted = false, highlightedStateIdx = null, nextEventWithin50px = false) {
             const height = laneHeight * 0.8;
             const centerY = y + laneHeight / 2;
             const color = EVENT_COLORS[event.type] || EVENT_COLORS['Unknown'];
@@ -2359,25 +2399,28 @@
                 ctx.lineWidth = lineWidth;
                 if (width > 0) ctx.strokeRect(startX, centerY - height/2, width, height);
                 
-                // Draw label if space allows
-                if (width > 50) {
-                    ctx.fillStyle = '#1f2937';
-                    ctx.font = '10px monospace';
-                    let label = event.func || event.type;
-                    // For CUPTI activities, show kernel name or activity type
-                    if (event.isCuptiActivity) {
-                        if (event.name) {
-                            label = event.name;
-                        } else if (event.type_name) {
-                            label = event.type_name;
-                        }
-                        // For memcpy/memset, show size if available
-                        if (event.size && (event.type === 'CuptiMemcpy' || event.type === 'CuptiMemset')) {
-                            const sizeMB = (event.size / (1024 * 1024)).toFixed(2);
-                            label += ` (${sizeMB}MB)`;
-                        }
+                // Build label text (always, for inside or outside bar)
+                let label = event.func || event.type;
+                if (event.isCuptiActivity) {
+                    if (event.name) {
+                        label = event.name;
+                    } else if (event.type_name) {
+                        label = event.type_name;
                     }
+                    if (event.size && (event.type === 'CuptiMemcpy' || event.type === 'CuptiMemset')) {
+                        const sizeMB = (event.size / (1024 * 1024)).toFixed(2);
+                        label += ` (${sizeMB}MB)`;
+                    }
+                }
+                ctx.fillStyle = '#1f2937';
+                ctx.font = 'bold 12px monospace';
+                const labelWidth = ctx.measureText(label).width;
+                const padding = 10;
+                const fitsInBar = width >= labelWidth + padding;
+                if (fitsInBar) {
                     ctx.fillText(label, startX + 5, centerY + 3);
+                } else if (!nextEventWithin50px) {
+                    ctx.fillText(label, endX + 5, centerY + 3);
                 }
             } else if (event.start !== null) {
                 // 2. RIGHT-POINTING TRIANGLE (only start exists)
@@ -2608,7 +2651,7 @@
             
             // Draw time labels in content area only
             ctx.fillStyle = '#555555';
-            ctx.font = '12px monospace';
+            ctx.font = 'bold 14px monospace';
             const numLabels = 10;
             for (let i = 0; i <= numLabels; i++) {
                 const time = minTime + (maxTime - minTime) * (i / numLabels);
@@ -2675,7 +2718,7 @@
                     
                     // Check if this is a CUPTI activity lane
                     if (firstEvent.isCuptiActivity) {
-                        // CUPTI activity lane label: prefer GPU UUID when available (short form for display)
+                        // CUPTI activity lane label: prefer GPU UUID when available (short form for display) – no "activities" count
                         const gpuLabel = firstEvent.gpuUuid
                             ? 'gpuUuid=' + (firstEvent.gpuUuid.length > 12 ? '...' + firstEvent.gpuUuid.slice(-8) : firstEvent.gpuUuid)
                             : `Device ${firstEvent.deviceId !== null && firstEvent.deviceId !== undefined ? firstEvent.deviceId : '?'}`;
@@ -2685,10 +2728,8 @@
                         } else if (tids.size > 1) {
                             label += ` | tids: ${Array.from(tids).join(',')}`;
                         }
-                        label += ` | ${laneEvents.length} activities`;
                     } else {
-                        // NCCL event lane label
-                        // Get communicator info (show first, as it's hierarchically above rank)
+                        // NCCL event lane label – no ctx, no "events" count
                         let commLabel = '';
                         if (firstEvent.commid && firstEvent.commid !== 'unknown') {
                             if (eventsData.commids && eventsData.commids.length > 0) {
@@ -2696,38 +2737,22 @@
                                 if (commIdx > 0) {
                             commLabel = `Comm#${commIdx}`;
                                 } else {
-                                    // CommId not in list, show short version
                                     const shortId = firstEvent.commid.length > 6 ? '...' + firstEvent.commid.slice(-6) : firstEvent.commid;
                                     commLabel = `Comm(${shortId})`;
                                 }
                             } else {
-                                // No commids list, show short version of this commid
                                 const shortId = firstEvent.commid.length > 6 ? '...' + firstEvent.commid.slice(-6) : firstEvent.commid;
                                 commLabel = `Comm(${shortId})`;
                             }
                         } else {
                             commLabel = 'Comm?';
                         }
-                        
-                        // Get context info (short version)
-                        let ctxLabel = '';
-                        if (firstEvent.ctx) {
-                            const shortCtx = firstEvent.ctx.length > 8 ? '...' + firstEvent.ctx.slice(-6) : firstEvent.ctx;
-                            ctxLabel = `ctx=${shortCtx}`;
-                        }
-                        
                         label = `${commLabel} | Rank ${firstEvent.rank}`;
-                        if (ctxLabel) {
-                            label += ` | ${ctxLabel}`;
-                        }
                         if (tids.size === 1) {
-                            // All events have the same thread ID
                             label += ` | tid=${Array.from(tids)[0]}`;
                         } else if (tids.size > 1) {
-                            // Multiple thread IDs in this lane
                             label += ` | tids: ${Array.from(tids).join(',')}`;
                         }
-                        label += ` | ${laneEvents.length} events`;
                     }
                     
                     // Draw lane label in reserved column (clip so it never spills into content area)
@@ -2736,7 +2761,7 @@
                     ctx.rect(0, y, LABEL_WIDTH - 6, laneHeight);
                     ctx.clip();
                     ctx.fillStyle = '#555555';
-                    ctx.font = '11px monospace';
+                    ctx.font = 'bold 13px monospace';
                     ctx.fillText(label, 10, y + laneHeight / 2 + 4);
                     ctx.restore();
                 }
@@ -2751,12 +2776,24 @@
                         highlightedEvent = event;
                     }
                     
+                    // Check if any other event in this lane starts within 50px after this event's end (avoid label overlap)
+                    const eventEndX = getEventEndX(event);
+                    let nextEventWithin50px = false;
+                    for (const [, other] of laneEvents) {
+                        if (other === event) continue;
+                        const otherStartX = getEventStartX(other);
+                        if (otherStartX > eventEndX && otherStartX <= eventEndX + 50) {
+                            nextEventWithin50px = true;
+                            break;
+                        }
+                    }
+                    
                     // Check if this event is hovered or highlighted
                     const isHovered = hoveredEvent === event;
                     const isHighlighted = highlightedEvent === event;
                     // Check if this event has a highlighted state
                     const stateHighlightIdx = (highlightedStateKey === key) ? highlightedStateIndex : null;
-                    const bounds = drawBar(event, laneIndex, y, isHovered, isHighlighted, stateHighlightIdx);
+                    const bounds = drawBar(event, laneIndex, y, isHovered, isHighlighted, stateHighlightIdx, nextEventWithin50px);
                     
                     // Store bounds for hover detection and arrow drawing
                     event._bounds = bounds;
