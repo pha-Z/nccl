@@ -40,8 +40,8 @@ static inline uint64_t get_time_ns(void) {
 }
 
 int main(int argc, char *argv[]) {
-  const int num_iterations = 10000;
-  const int warmup_iterations = 100;
+  const int num_iterations = 100;
+  const int warmup_iterations = 10;
 
   int num_gpus = 0;
   CUDACHECK(cudaGetDeviceCount(&num_gpus));
@@ -89,31 +89,26 @@ int main(int argc, char *argv[]) {
   double init_destroy_time_ms = init_destroy_time_ns / 1e6;
   double avg_init_destroy_us = init_destroy_time_ns / (double)num_iterations / 1000.0;
 
-  // Test 2: CommSplit cycles
-  printf("Running comm split cycles...\n");
+  // Test 2: Child comm split/destroy only (parent init once) – measures NCCL profiler overhead on split/destroy
+  printf("Running comm split/destroy cycles (parent init once)...\n");
+  NCCLCHECK(ncclCommInitAll(parent_comms, num_gpus, devices));
+
   start_time = get_time_ns();
   for (int iter = 0; iter < num_iterations; iter++) {
-    // Create parent comm
-    NCCLCHECK(ncclCommInitAll(parent_comms, num_gpus, devices));
-    
-    // Split into two groups (even/odd ranks)
     for (int i = 0; i < num_gpus; i++) {
       int color = i % 2;
       int key = i;
       NCCLCHECK(ncclCommSplit(parent_comms[i], color, key, &child_comms[i], NULL));
     }
-    
-    // Destroy child comms
     for (int i = 0; i < num_gpus; i++) {
       NCCLCHECK(ncclCommDestroy(child_comms[i]));
     }
-    
-    // Destroy parent comms
-    for (int i = 0; i < num_gpus; i++) {
-      NCCLCHECK(ncclCommDestroy(parent_comms[i]));
-    }
   }
   end_time = get_time_ns();
+
+  for (int i = 0; i < num_gpus; i++) {
+    NCCLCHECK(ncclCommDestroy(parent_comms[i]));
+  }
   uint64_t split_time_ns = end_time - start_time;
   double split_time_ms = split_time_ns / 1e6;
   double avg_split_us = split_time_ns / (double)num_iterations / 1000.0;
@@ -129,7 +124,7 @@ int main(int argc, char *argv[]) {
   printf("    \"avg_time_per_iteration_us\": %.3f,\n", avg_init_destroy_us);
   printf("    \"total_time_ns\": %lu\n", init_destroy_time_ns);
   printf("  },\n");
-  printf("  \"comm_split\": {\n");
+  printf("  \"comm_split_destroy_only\": {\n");
   printf("    \"total_time_ms\": %.3f,\n", split_time_ms);
   printf("    \"avg_time_per_iteration_us\": %.3f,\n", avg_split_us);
   printf("    \"total_time_ns\": %lu\n", split_time_ns);

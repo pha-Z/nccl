@@ -9,7 +9,26 @@ The experiments measure the performance impact of:
 - Memory allocation overhead for event/context structures
 - Plugin loading overhead
 
-## Experiments
+## Experiments with NVIDIA nccl-tests (recommended for collectives and P2P)
+
+**Collectives and P2P** are run using [NVIDIA nccl-tests](https://github.com/NVIDIA/nccl-tests) so that results are easily reproducible by others. Communicator operations (init/destroy, split, etc.) are not covered by nccl-tests; use the custom experiments below for those.
+
+- **Location on HPC:** `/projects/p047/p_lv_nccl/nccl-tests`
+- **Single-node:** `all_reduce_perf`, `sendrecv_perf` (no MPI build required).
+- **Multi-node:** same binaries, launched with `srun`; build with `make MPI=1 MPI_HOME=... CUDA_HOME=... NCCL_HOME=...`.
+
+Slurm scripts (in `slurm-scripts/`):
+
+| Script | Test | Nodes | Binary |
+|--------|------|--------|--------|
+| `run_nccl_tests_collectives.sh` | AllReduce | 1 | `all_reduce_perf` |
+| `run_nccl_tests_collectives_multinode.sh` | AllReduce | 2 | `all_reduce_perf` (srun) |
+| `run_nccl_tests_p2p.sh` | SendRecv (P2P) | 1 | `sendrecv_perf` |
+| `run_nccl_tests_p2p_multinode.sh` | SendRecv (P2P) | 2 | `sendrecv_perf` (srun) |
+
+Scripts use the same `NCCL_PATH` as the other slurm scripts; `NCCL_TESTS_HOME` is set to `/projects/p047/p_lv_nccl/nccl-tests`. Each run uses 1M iterations, 100 warmup, and writes results into `nccl_tests_results_*_<jobid>/`.
+
+## Custom experiments (optional)
 
 ### 1. Collectives Overhead (`01_collectives_overhead`)
 Measures overhead for collective operations (AllReduce) by running 100,000 iterations with very small buffers (4 floats) to emphasize call overhead over data transfer time.
@@ -18,7 +37,7 @@ Measures overhead for collective operations (AllReduce) by running 100,000 itera
 Measures overhead for point-to-point operations (Send/Recv) by running 100,000 iterations with very small buffers.
 
 ### 3. Communicator Operations Overhead (`03_comm_ops_overhead`)
-Measures overhead for communicator operations:
+Measures overhead for communicator operations (not in nccl-tests):
 - Init/Destroy cycles (100,000 iterations)
 - CommSplit cycles (100,000 iterations)
 
@@ -68,7 +87,18 @@ export NCCL_PROFILE_EVENT_MASK=4095
 
 ### SLURM Execution
 
-**Single-node scripts:**
+**nccl-tests (collectives and P2P, recommended):**
+```bash
+cd examples/experiments/slurm-scripts
+# Single-node
+sbatch run_nccl_tests_collectives.sh
+sbatch run_nccl_tests_p2p.sh
+# Multi-node (requires nccl-tests built with MPI=1)
+sbatch run_nccl_tests_collectives_multinode.sh
+sbatch run_nccl_tests_p2p_multinode.sh
+```
+
+**Custom single-node scripts:**
 ```bash
 cd examples/experiments/slurm-scripts
 sbatch run_overhead_collectives.sh
@@ -76,7 +106,7 @@ sbatch run_overhead_p2p.sh
 sbatch run_overhead_comm_ops.sh
 ```
 
-**Multi-node scripts (for network-related overhead):**
+**Custom multi-node scripts (for network-related overhead):**
 ```bash
 cd examples/experiments/slurm-scripts
 sbatch run_overhead_collectives_multinode.sh

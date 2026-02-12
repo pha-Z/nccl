@@ -66,8 +66,8 @@ int getLocalRank(MPI_Comm comm) {
 }
 
 int main(int argc, char *argv[]) {
-  const int num_iterations = 10000;
-  const int warmup_iterations = 100;
+  const int num_iterations = 100;
+  const int warmup_iterations = 10;
 
   // Initialize MPI
   MPICHECK(MPI_Init(&argc, &argv));
@@ -148,33 +148,30 @@ int main(int argc, char *argv[]) {
   double init_destroy_time_ms = init_destroy_time_ns / 1e6;
   double avg_init_destroy_us = init_destroy_time_ns / (double)num_iterations / 1000.0;
 
-  // Test 2: CommSplit cycles
+  // Test 2: Child comm split/destroy only (parent init once) – measures NCCL profiler overhead on split/destroy without MPI_Bcast
   if (mpi_rank == 0) {
-    printf("Running comm split cycles...\n");
+    printf("Running comm split/destroy cycles (parent init once)...\n");
   }
+  ncclUniqueId split_id;
+  if (mpi_rank == 0) {
+    NCCLCHECK(ncclGetUniqueId(&split_id));
+  }
+  MPICHECK(MPI_Bcast((void *)&split_id, sizeof(split_id), MPI_BYTE, 0, MPI_COMM_WORLD));
+
+  ncclComm_t parent_comm;
+  NCCLCHECK(ncclCommInitRank(&parent_comm, mpi_size, split_id, mpi_rank));
+
   start_time = get_time_ns();
   for (int iter = 0; iter < num_iterations; iter++) {
-    // Create parent comm
-    ncclUniqueId id;
-    if (mpi_rank == 0) {
-      NCCLCHECK(ncclGetUniqueId(&id));
-    }
-    MPICHECK(MPI_Bcast((void *)&id, sizeof(id), MPI_BYTE, 0, MPI_COMM_WORLD));
-
-    ncclComm_t parent_comm;
-    NCCLCHECK(ncclCommInitRank(&parent_comm, mpi_size, id, mpi_rank));
-
-    // Split into two groups (even/odd ranks)
     ncclComm_t child_comm;
     int color = mpi_rank % 2;
     int key = mpi_rank;
     NCCLCHECK(ncclCommSplit(parent_comm, color, key, &child_comm, NULL));
-
-    // Destroy child and parent comms
     NCCLCHECK(ncclCommDestroy(child_comm));
-    NCCLCHECK(ncclCommDestroy(parent_comm));
   }
   end_time = get_time_ns();
+
+  NCCLCHECK(ncclCommDestroy(parent_comm));
   uint64_t split_time_ns = end_time - start_time;
   double split_time_ms = split_time_ns / 1e6;
   double avg_split_us = split_time_ns / (double)num_iterations / 1000.0;
@@ -198,7 +195,7 @@ int main(int argc, char *argv[]) {
     printf("    \"avg_time_per_iteration_us\": %.3f,\n", avg_init_destroy_us);
     printf("    \"total_time_ns\": %lu\n", init_destroy_time_ns);
     printf("  },\n");
-    printf("  \"comm_split\": {\n");
+    printf("  \"comm_split_destroy_only\": {\n");
     printf("    \"total_time_ms\": %.3f,\n", max_split_ms);
     printf("    \"avg_time_per_iteration_us\": %.3f,\n", avg_split_us);
     printf("    \"total_time_ns\": %lu\n", split_time_ns);
