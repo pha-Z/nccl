@@ -467,7 +467,7 @@ The plugin loading mechanism expects the struct variable name to follow the nami
 The profiler API has changed multiple times with newer NCCL releases; 
 NCCL features a fallback mechanism to load older struct versions.
 However from personal experience, backwards compatibility with plugins from API version 2 may be limited.
-One instance is known, where a profiler plugin being developed against the NCCL release 2.25.1 with Profiler API version 2, was unable to run with the latest NCCL release.
+One instance is known, where a profiler plugin being developed against the NCCL release 2.25.1 with Profiler API version 2, was unable to run with the latest NCCL release\footnote{\url{https://github.com/variemai/ncclsee}}.
 NCCL developers may be required to actively maintain older API versions, to ensure they safely work when old behaviour is getting deprecated 
 and do not unexpectedly get handed new features from new API versions, 
 of which the Profiler Plugin developer is not aware of (when faithfully implementing old API versions).
