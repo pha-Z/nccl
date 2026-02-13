@@ -29,4 +29,4 @@
 \contentsline {paragraph}{Tracking communicator parent--child relationships.}{25}{section*.9}%
 \contentsline {subsection}{\numberline {4.2}Known limitations}{26}{subsection.4.2}%
 \contentsline {subsection}{\numberline {4.3}Potential Integration with Score-P}{26}{subsection.4.3}%
-\contentsline {section}{\numberline {5}Conclusion}{27}{section.5}%
+\contentsline {section}{\numberline {5}Conclusion}{26}{section.5}%

@@ -1,6 +1,6 @@
 # Fdb version 4
-["pdflatex"] 1770985767.40412 "c:/Users/morit/Desktop/uni/hauptseminar nccl/nccl/uni_report_latex/en/uni_nccl_report.tex" "uni_nccl_report.pdf" "uni_nccl_report" 1770985776.48805 0
-  "c:/Users/morit/Desktop/uni/hauptseminar nccl/nccl/uni_report_latex/en/uni_nccl_report.tex" 1770985774 77301 dd0842fd2795c16b500efef94ba5fe58 ""
+["pdflatex"] 1770990144.39043 "c:/Users/morit/Desktop/uni/hauptseminar nccl/nccl/uni_report_latex/en/uni_nccl_report.tex" "uni_nccl_report.pdf" "uni_nccl_report" 1770990152.78605 0
+  "c:/Users/morit/Desktop/uni/hauptseminar nccl/nccl/uni_report_latex/en/uni_nccl_report.tex" 1770990134 76708 d0eeff5537955fc4bf990adad0783ae0 ""
   "c:/a/texlive/2025/texmf-dist/fonts/enc/dvips/cm-super/cm-super-t1.enc" 1769773706 2971 def0b6c1f0b107b3b936def894055589 ""
   "c:/a/texlive/2025/texmf-dist/fonts/enc/dvips/cm-super/cm-super-ts1.enc" 1769773706 2900 1537cc8184ad1792082cd229ecc269f4 ""
   "c:/a/texlive/2025/texmf-dist/fonts/map/fontname/texfonts.map" 1769775222 3524 cb3e574dea2d1052e39280babc910dc8 ""
@@ -194,10 +194,10 @@
   "images/ncclgroup stress test/cupti example.png" 1770975570 297785 6f37ce3919bec8e5db84dab3163dbe57 ""
   "images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter.png" 1770672905 274556 9b17e59e06c86eb18e0dcc81b0db683d ""
   "images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter.png" 1770973205 316247 a359502b99a6b261b26409362cb6d6ca ""
-  "uni_nccl_report.aux" 1770985775 14577 5b58af198b9278f25b90c3cfad982d6a "pdflatex"
-  "uni_nccl_report.out" 1770985775 3887 3ecd2b40dbfabee75c9e32b5229a3852 "pdflatex"
-  "uni_nccl_report.tex" 1770985774 77301 dd0842fd2795c16b500efef94ba5fe58 ""
-  "uni_nccl_report.toc" 1770985775 2763 e7eb7fe5d2e4ed3831b50aa4007e08d0 "pdflatex"
+  "uni_nccl_report.aux" 1770990152 14553 d90d63ad22369dd0b8aba7e411970ed6 "pdflatex"
+  "uni_nccl_report.out" 1770990152 3887 3ecd2b40dbfabee75c9e32b5229a3852 "pdflatex"
+  "uni_nccl_report.tex" 1770990134 76708 d0eeff5537955fc4bf990adad0783ae0 ""
+  "uni_nccl_report.toc" 1770990152 2763 e9c1506beea4f7f8fc586b23a744e922 "pdflatex"
   (generated)
   "uni_nccl_report.aux"
   "uni_nccl_report.log"

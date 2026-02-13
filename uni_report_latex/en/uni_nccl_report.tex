@@ -174,7 +174,7 @@ We model four participants: the \emph{User} (application), \emph{NCCL} (internal
   \begin{callself}{nccl}{ncclCommInitRankFunc}{}
     \begin{callself}{nccl}{initTransportsRank}{}
       
-      \begin{callself}{nccl}{ncclProfilerPluginInit()}{}
+      \begin{callself}{nccl}{ncclProfilerPluginInit}{}
       \end{callself}
 
       \begin{callself}{nccl}{ncclProxyCreate}{}
@@ -241,7 +241,7 @@ struct ncclProxyOps {
 }
 \end{lstlisting}
 
-By default every NCCL communicator has its own shared resource. When the application calls \texttt{ncclCommSplit()} or \texttt{ncclCommShrink()} where the original communicator was initialized with a \texttt{ncclConfig\_t} with fields \texttt{splitShare} or \texttt{shrinkShare} set to \texttt{1}, the newly created communicator shares the shared resource (and the proxy threads) with the parent communicator.
+By default every NCCL communicator has its own shared resource. When the application calls \texttt{ncclCommSplit} or \texttt{ncclCommShrink} where the original communicator was initialized with a \\\texttt{ncclConfig\_t} with fields \texttt{splitShare} or \texttt{shrinkShare} set to \texttt{1}, the newly created communicator shares the shared resource (and the proxy threads) with the parent communicator.
 
 \small
 \begin{quote}
@@ -254,7 +254,7 @@ By default every NCCL communicator has its own shared resource. When the applica
 
 
 Later, whenever the application calls the NCCL User API, 
-NCCL internally decides what network operations to perform and calls \texttt{ncclProxyPost()} to post them to a proxyOpsPool
+NCCL internally decides what network operations to perform and calls \texttt{ncclProxyPost} to post them to a proxyOpsPool
 (See Figure~\ref{fig:proxy-post}).
 
 \iffalse
@@ -373,11 +373,11 @@ We show the \emph{User} invoking \emph{NCCL} with either a collective/P2P call o
 % \end{callself}
 
 \end{sequencediagram}%
-\caption{Flow from User API to \texttt{ncclProxyPost()}}
+\caption{Flow from User API to \texttt{ncclProxyPost}}
 \label{fig:proxy-post}
 \end{figure}
 
-The ProxyProgress thread reads from this pool when calling \texttt{ncclProxyGetPostedOps()} and progresses the ops.
+The ProxyProgress thread reads from this pool when calling \texttt{ncclProxyGetPostedOps} and progresses the ops.
 See Figure~\ref{fig:proxy-progress-loop}.
 
 \iffalse
@@ -425,11 +425,11 @@ We use a single participant (the ProxyProgress thread) and a loop block. Inside 
 
 \end{sdblock}
 \end{sequencediagram}%
-\caption{\textbf{/src/proxy.cc} \texttt{ncclProxyProgress()} progressing loop: progress ops, then get posted ops (or wait). }
+\caption{\textbf{/src/proxy.cc} \texttt{ncclProxyProgress} progressing loop: progress ops, then get posted ops (or wait). }
 \label{fig:proxy-progress-loop}
 \end{figure}
 
-In the next section, understanding the behaviour of NCCL for network-related activity is helpful in relation to the behavior of Profiler Plugin API.
+Understanding this behaviour for network-related activity is helpful in relation to the behavior of Profiler Plugin API in the next section.
 
 % ---------------------------------------------------------------------------
 \section{The Profiler API}
@@ -464,10 +464,9 @@ The profiler plugin is loaded when creating a communicator (before proxy thread 
 The plugin loading mechanism expects the struct variable name to follow the naming convention\\ 
 \texttt{ncclProfiler\_v\{versionNum\}}, which also indicates the API version.
 
-The profiler API has changed multiple times with newer NCCL releases; 
+The profiler API has changed multiple times with newer NCCL releases. 
 NCCL features a fallback mechanism to load older struct versions.
-However from personal experience, backwards compatibility with plugins from API version 2 may be limited.
-One instance is known, where a profiler plugin being developed against the NCCL release 2.25.1 with Profiler API version 2, was unable to run with the latest NCCL release\footnote{\url{https://github.com/variemai/ncclsee}}.
+However one instance is known, where a profiler plugin being developed against the NCCL release 2.25.1 with Profiler API version 2, was unable to run with the latest NCCL release\footnote{\url{https://github.com/variemai/ncclsee}}.
 NCCL developers may be required to actively maintain older API versions, to ensure they safely work when old behaviour is getting deprecated 
 and do not unexpectedly get handed new features from new API versions, 
 of which the Profiler Plugin developer is not aware of (when faithfully implementing old API versions).
@@ -558,7 +557,7 @@ We show three participants: \emph{User}, \emph{NCCL}, and \emph{Profiler plugin}
   \end{callself}
 \end{call}
 \end{sequencediagram}%
-\caption{User API $\to$ NCCL init $\to$ load profiler plugin and call \texttt{profiler->init()}.}
+\caption{User API $\to$ NCCL init $\to$ load profiler plugin and call \texttt{profiler->init}.}
 \label{fig:profiler-init}
 \end{figure}
 
@@ -604,7 +603,7 @@ ncclResult_t init(
 );
 \end{lstlisting}
 
-Every time a communicator is created, \texttt{init()} is called immediately upon successful plugin load in \texttt{ncclProfilerPluginLoad()} 
+Every time a communicator is created, \texttt{init} is called immediately upon successful plugin load in \texttt{ncclProfilerPluginLoad} 
 (see Figure~\ref{fig:profiler-init}). If the profiler plugin \texttt{init} function does not return \texttt{ncclSuccess}, NCCL disables the plugin.
 
 
@@ -644,8 +643,8 @@ The use of this field can be explained as following:
 
 All User API calls to Collective or P2P operations will start a Group API event.
 When networking is required, ProxyCtrl Events may be emitted. 
-Depending on the `eActivationMask` bitmask returned in the `init()` function, 
-further (child) events will be emitted in deeper sections of the nccl code base. 
+Depending on the \texttt{eActivationMask} bitmask returned in the \texttt{init} function, 
+further (child) events will be emitted in deeper regions of the nccl code base. 
 It can be thought of as an event hierarchy with several depth levels:
 
 
@@ -694,9 +693,10 @@ ncclResult_t stopEvent(void* eHandle);  // handle to event object
 \end{lstlisting}
 \texttt{stopEvent} tells the plugin that the event has stopped. \texttt{stopEvent} for collectives simply indicates to the profiler that the collective has been enqueued and not that the collective has been completed.
 
-NCCL ignores the return value. \texttt{stopEvent} is called in the same functions that call \texttt{startEvent}, except for the GroupApi event (see diagram).
+NCCL ignores the return value. 
 
-Figure~\ref{fig:profiler-events} shows when NCCL emits \texttt{startEvent} and \texttt{stopEvent} after a User API call.
+\texttt{stopEvent} is called in the same functions that call \texttt{startEvent}, except for the GroupApi event.
+Figure~\ref{fig:profiler-events} shows when NCCL emits \texttt{startEvent} and \texttt{stopEvent} after a user API call.
 The Proxy\-Progress thread also emits \texttt{startEvent} and \texttt{stopEvent} while progressing ops (see Figure~\ref{fig:proxy-event-emission}).
 
 \iffalse
@@ -961,8 +961,8 @@ We use one participant (ProxyProgress thread) and a loop block. Inside the loop 
 \end{figure}
 
 \texttt{op->progress()} progresses transport specific ops. 
-this is implemented as a function pointer type (defined in \textbf{/src/include/proxy.h}). 
-Confusingly the variable is called `op`, although its type is \texttt{ncclProxyArgs} and NOT \texttt{ncclProxyOp}.
+This is implemented as a function pointer type (defined in \textbf{/src/include/proxy.h}). 
+Confusingly the variable is called `op`, although its type is \texttt{ncclProxyArgs} and \emph{not} \texttt{ncclProxyOp}.
 
 \begin{lstlisting}[language=C]
 typedef ncclResult_t (*proxyProgressFunc_t)(struct ncclProxyState*, struct ncclProxyArgs*);
@@ -997,9 +997,9 @@ Called at the same sites as \texttt{startEvent}.
 \begin{lstlisting}[language=C]
   ncclResult_t finalize(void* context);
 \end{lstlisting}
-After a user API call to free resources associated with a communicator, \texttt{finalize()} is called.
+After a user API call to free resources associated with a communicator, \texttt{finalize} is called.
 Afterwards, a reference counter tracks how many communicators are still being tracked by the profiler plugin. 
-If it reaches 0, the plugin will be closed via \texttt{dlclose(handle)}. Figure~\ref{fig:profiler-finalize} depicts the flow from user API call to \texttt{finalize()}.
+If it reaches 0, the plugin will be closed via \texttt{dlclose(handle)}. Figure~\ref{fig:profiler-finalize} depicts the flow from user API call to \texttt{finalize}.
 See implementation at \textbf{/src/init.cc}, \textbf{/src/plugin/profiler.cc}, \textbf{/src/plugin/plugin\_open.cc}.
 
 \iffalse
@@ -1050,7 +1050,7 @@ We show three participants: \emph{User}, \emph{NCCL}, and \emph{Profiler plugin}
 \end{call}
 \end{sequencediagram}%
 }
-\caption{User API $\to$ \texttt{commReclaim()} $\to$ \texttt{finalize()} $\to$ plugin unload.}
+\caption{User API $\to$ \texttt{commReclaim} $\to$ \texttt{finalize} $\to$ plugin unload.}
 \label{fig:profiler-finalize}
 \end{figure}
 
@@ -1068,10 +1068,8 @@ The following examples illustrate the profiling behavior under different environ
   \item One Device per Thread
   \item Multiple Devices per Thread utilizing \texttt{ncclGroupStart} and \texttt{ncclGroupEnd}
   \item One Device per Thread and grouped collectives utilizting \texttt{ncclGroupStart} and \texttt{ncclGroupEnd}
-  \item Multiple Devices per Thread and grouped collectives utilizting \texttt{ncclGroupStart} and \texttt{ncclGroupEnd}
+  % \item Multiple Devices per Thread and grouped collectives utilizting \texttt{ncclGroupStart} and \texttt{ncclGroupEnd}
 \end{itemize}
-
-TODO add exampless and pictures (profiler that just does logging + application examples)
 
 A profiler plugin that logs all call information to a file is used in all examples.
 An exemplary illustration is shown below:
@@ -1174,7 +1172,7 @@ The profiler API calls are visualized in Fig~\ref{fig:multi-gpu-single-thread-al
       The next \texttt{ProxyCtrl} event shows the proxy thread sleeping again. 
       Finally, profiler \texttt{finalize} is called, which happens when the application cleans up NCCL communicators and no further communicators are tracked in the profiler in each respective thread.
       Matching \texttt{coll} events across ranks can be identified for the same collective. 
-      This is shown by red lines connecting events with equal \texttt{seqNum} values (from \texttt{eDescr} in the profiler API \texttt{init()} call) across ranks
+      This is shown by red lines connecting events with equal \texttt{seqNum} values (from \texttt{eDescr} in the profiler API \texttt{init} call) across ranks
     }
   \label{fig:multi-gpu-single-thread-allreduce}
 \end{figure}
@@ -1502,11 +1500,11 @@ is this even worth talking about?
 
 \paragraph{Kernel tracing with CUPTI.}
 The CUPTI API provides functions to correlate application code regions with CUPTI activity
-via \texttt{cuptiActivityPushExternalCorrelationId} and \texttt{cuptiActivityPopExternalCorrelationId}.
+via \texttt{cuptiActivityPushExternalCorrelationId} and \\ \texttt{cuptiActivityPopExternalCorrelationId}.
 This can be handily integrated with the profiler API, whenever \texttt{KernelLaunch} events are started and stopped, 
 while continuously incrementing the correlation id in a thread-safe manner.
 Fig~\ref{fig:cupti-example} provides an example visualization of this method.
-Cupti can be initialized and cleaned up within the profiler plugin's own \texttt{init} and \texttt{finalize} functions.
+CUPTI can be initialized and cleaned up within the profiler plugin's own \texttt{init} and \texttt{finalize} functions.
 
 \begin{figure}[H]
   \centering
@@ -1539,7 +1537,7 @@ This value is present in the \texttt{eDescr} for collective events
 and can be used to identify which collectives operations belong together across processes (see Fig~\ref{fig:phase-4-3rd-iter}).
 
 \paragraph{Tracing low level activity back to NCCL API calls with \texttt{parentObj}.}
-If the plugin developer wants utilize this field, 
+If a plugin developer wants utilize this field, 
 they should ensure that potential address reuse does not create ambiguity to what the parentObj was originally pointing to. 
 Custom memory management is advised.
 This field is useful when trying to understand which user API call triggered which events of lower level operations or activity such as network activity (see Fig~\ref{fig:phase-4-3rd-iter}).
@@ -1581,7 +1579,7 @@ From profiler version 4, NCCL uses a per-channel ring buffer of 64 elements.
 Each counter is complemented by two timestamps (ptimers) supplied by the NCCL kernel (start and stop of the operation in the kernel). 
 NCCL propagates these timestamps to the profiler plugin so it can convert them to the CPU time domain.
 
-(Source: \url{https://github.com/NVIDIA/nccl/tree/master/ext-profiler/README.md}
+(Source: \textbf{/ext-profiler/README.md})
 
 \subsection{Potential Integration with Score-P}
 
@@ -1602,13 +1600,10 @@ A potential integration strategy would involve writing a \textbf{dual-interface 
 A developer writes a shared library that simultaneously implements the NCCL profiler API and integrates with Score-P as a substrate plugin.
 Score-P loads the plugin as \texttt{libscorep\_substrate\_{\it nccl}.so}, 
 while NCCL loads it via the environment variable \texttt{NCCL\_PROFILER\_PLUGIN}.
-Although substrate plugins consume but do not produce events, the plugin could use Score-P's user instrumentation API
+Although substrate plugins primarily consume events, the plugin could use Score-P's user instrumentation API
 (e.g., \texttt{SCOREP\_USER\_REGION\_BY\_NAME\_BEGIN}/\texttt{END})
-to inject Profiler Events (and by extension NCCL operations) as regions into Score-P's.
-When NCCL calls \texttt{startEvent} or \texttt{stopEvent}, the plugin converts those callbacks into Score-P events.
-The region name can be derived from the event descriptor (e.g., \texttt{collApi.func} for \texttt{ncclAllReduce}).
-The application must be compiled with Score-P instrumentation and linked against the Score-P measurement library;
-\texttt{NCCL\_PROFILER\_PLUGIN} points to the dual-interface library.
+to inject NCCL Profiler Events as regions into Score-P.
+The region name could be derived from the event descriptor (e.g., \texttt{collApi.func} for \texttt{ncclAllReduce}).
 
 In this design, NCCL drives the profiler and the profiler forwards events into Score-P. 
 NCCL collective operations then appear as regions in Score-P profiles and traces.
