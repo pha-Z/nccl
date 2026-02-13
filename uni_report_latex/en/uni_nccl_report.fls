@@ -288,6 +288,15 @@ INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/cm/cmex10.tfm
 INPUT c:/a/texlive/2025/texmf-var/fonts/map/pdftex/updmap/pdftex.map
 INPUT c:/a/texlive/2025/texmf-dist/fonts/enc/dvips/cm-super/cm-super-t1.enc
 OUTPUT uni_nccl_report.toc
+INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/jknappen/ec/ecrm0800.tfm
+INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/jknappen/ec/ecrm0900.tfm
+INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/cm/cmr9.tfm
+INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/cm/cmmi9.tfm
+INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/cm/cmsy9.tfm
+INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/amsfonts/cmextra/cmex9.tfm
+INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/amsfonts/cmextra/cmex7.tfm
+INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/jknappen/ec/ecrm0600.tfm
+INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/jknappen/ec/ectt0900.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/jknappen/ec/ecbx1200.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/jknappen/ec/tcrm1095.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/jknappen/ec/ectt1095.tfm
@@ -302,15 +311,6 @@ INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/jknappen/ec/ecrm1000.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/enc/dvips/cm-super/cm-super-ts1.enc
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/jknappen/ec/ecbx1000.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/amsfonts/cmextra/cmex7.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/amsfonts/cmextra/cmex7.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/jknappen/ec/ecrm0800.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/jknappen/ec/ecrm0900.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/cm/cmr9.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/cm/cmmi9.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/cm/cmsy9.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/amsfonts/cmextra/cmex9.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/jknappen/ec/ecrm0600.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/jknappen/ec/ectt0900.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/jknappen/ec/ecti1095.tfm
 INPUT ./images/multi_gpu_single_thread/finalize alt (2).png
 INPUT ./images/multi_gpu_single_thread/finalize alt (2).png
