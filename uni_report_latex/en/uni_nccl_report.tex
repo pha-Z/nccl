@@ -51,34 +51,6 @@
 \tableofcontents
 
 % ---------------------------------------------------------------------------
-\section{TODO / Structure (from Markdown)}
-% ---------------------------------------------------------------------------
-
-\subsection{Table of Contents}
-\begin{itemize}
-  \item Abstract -- motivate GPU communication profiling/tracing
-  \item Introduction -- assumed background as needed (e.g.\ MPI, NCCL, SLURM, Score-P)
-  \item The Profiler API
-  \begin{itemize}
-    \item How NCCL detects the profiler plugin (first draft; TODO final draft)
-    \item The Profiler API definition (with codeflow/swimlane diagrams showing where NCCL calls the profiler api)
-    \item Code examples illustrating the codeflow/behaviour (simple example, multi-node, ncclGroup)
-    \item What is possible with the Profiler Plugin API? Considerations and Pitfalls for (logging, running metrics, CUPTI, \ldots) - section title WIP
-    \item Performance and scalability of the Profiler Plugin API (experiments, accuracy)  
-  \end{itemize}
-  \item Potential integration with Score-P
-  \item Conclusion
-\end{itemize}
-
-\subsection{Main content chunks / concepts}
-\begin{itemize}
-  \item Simple code example walkthroughs
-  \item Swim-lane diagrams (User API $\to$ init/finalize; start/stop/recordEventState)
-  \item Benchmarking, measurements
-  \item Conclusion
-\end{itemize}
-
-% ---------------------------------------------------------------------------
 \section{Abstract}
 % ---------------------------------------------------------------------------
 
@@ -90,7 +62,10 @@ To provide detailed performance insights, NCCL offers a flexible profiler plugin
 This allows developers to directly integrate custom profiling tools into the library to extract detailed performance data on communication operations. 
 This feasibility study explores the capabilities and integration mechanisms of the API.
 
-TODO finally, mention the structure of this document?
+First, this study provides background information on NCCL, 
+followed by an explanation of the Profiler API is explained accompanied with code examples and visualizations.
+Next, considerations for developers of the Profiler API and its potential integration with Score-P is discussed. 
+Finally, the study concludes with a summary of the findings.
 
 % ---------------------------------------------------------------------------
 \section{About NCCL}
@@ -105,8 +80,8 @@ Before taking a closer look at the Profiler Plugin API, it is helpful to have so
 \subsection{Comparison to MPI}
 Although NCCL is inspired by the Message Passing Interface (MPI) in terms of API design and usage patterns, there are notable differences due to their respective focuses:
 \begin{itemize}
-\item \textbf{MPI}: Communication is CPU-based. A rank corresponds to a single CPU process, and within a communicator, each process is assigned exactly one unique rank.
-\item \textbf{NCCL}: Communication is GPU-based, with CPU threads handling orchestration. A rank corresponds to a GPU device, and a single CPU thread can manage multiple ranks (i.e., multiple devices) using functions such as \texttt{ncclGroupStart} and \texttt{ncclGroupEnd}.
+\item \textbf{MPI}: Communication is CPU-based. A rank corresponds to a single CPU process within a communicator.
+\item \textbf{NCCL}: Communication is GPU-based, with CPU threads handling orchestration. A rank corresponds to a GPU device within a communicator; the mapping from ranks to devices is surjective. A single CPU thread can manage multiple ranks (i.e., multiple devices) in a communicator using the functions \texttt{ncclGroupStart} and \texttt{ncclGroupEnd}. A CPU thread can also manage multiple ranks from different communicators (i.e same device alloted by multiple ranks from different communicators) through communicator creation with \texttt{ncclCommSplit} or \texttt{ncclCommShrink}. This means the mapping from ranks to threads is also surjective.
 \end{itemize}
 
 \subsection{Relevant NCCL internals}
@@ -1090,17 +1065,16 @@ It will be used for all logging, especially when \texttt{NCCL\_DEBUG=INFO} is se
 The following examples illustrate the profiling behavior under different environment settings and user application.
 
 \begin{itemize}
-  \item single process multiple devices
-  \item mpi multiple processes with multiple device per process (multiple threads per process)
-  \item mpi multiple processes with multiple device per process (single thread per process, utilizing ncclGroup)
-  \item behavior when utilizing ncclGroup for collective operations
+  \item One Device per Thread
+  \item Multiple Devices per Thread utilizing \texttt{ncclGroupStart} and \texttt{ncclGroupEnd}
+  \item One Device per Thread and grouped collectives utilizting \texttt{ncclGroupStart} and \texttt{ncclGroupEnd}
+  \item Multiple Devices per Thread and grouped collectives utilizting \texttt{ncclGroupStart} and \texttt{ncclGroupEnd}
 \end{itemize}
 
 TODO add exampless and pictures (profiler that just does logging + application examples)
 
-An example implementation of a profiler plugin may just log all call information to a file.
-A simplified view of the plugin code used throughout the examples is as follows:
-
+A profiler plugin that logs all call information to a file is used in all examples.
+An exemplary illustration is shown below:
 \begin{lstlisting}[language=C]
 struct MyContext { /* custom context struct */ };
 struct MyEvent { /* custom event struct */ };
@@ -1126,7 +1100,7 @@ ncclResult_t myStartEvent( /* args - *eHandle, ... */ ) {
 }
 
 ncclResult_t myStopEvent(void* eHandle) {
-  writeJsonl(getTime(), args);
+  writeJsonl(getTime(), eHandle);
   return ncclSuccess;
 }
 
@@ -1152,250 +1126,214 @@ ncclProfiler_v5_t ncclProfiler_v5 = {
 };
 \end{lstlisting}
 
-\subsubsection{Single Process Multiple Devices}
+\subsubsection{One Device per Thread}
 
-In this example, there is a single task running on one node with multiple GPUs.
-The example application for this can be found under \textbf{/examples/03\_collectives/01\_allreduce/}. In essence, it does the following:
-\begin{itemize}
-  \item Detect Available GPUs
-  \item Allocate Memory for Communicators, Streams, and Data Buffers
-  \item Initialize NCCL Communicators for All Devices
-  \item Create CUDA Streams and Allocate Device Memory
-  \item Perform AllReduce Sum Operation
-  \item Cleanup Resources and Report Results
-\end{itemize}
+This example visualizes an AllReduce collective across multiple GPUs (see Fig~\ref{fig:multi-gpu-single-thread-allreduce} and Fig~\ref{fig:multi-gpu-single-thread-show-proxystep}).
+Each NCCL thread manages a single GPU. 
+This may be achieved by starting out with the same number of MPI tasks with each task running single threaded;
+or by having less MPI tasks, but the tasks create multiple thread workers.
+Custom initialization without MPI is also possible if desired.
 
-The logs written by the profiler plugin can be visualized, creating following output:
+\begin{lstlisting}[language=C]
+// broadcast a commId 
 
-TODO run this example (or a modified version with one additional warmup allreduce) on HPC
-2761641
+// ...
 
-TODO organize and save outputs locally 
+ncclCommInitRank(&rootComm, nRanks, commId, myRank);
 
-TODO visualize output
+// ...
 
-TODO add screenshot here
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=\textwidth]{"images/03_communicators_01_allreduce/finalize.png"}
-    \caption{Single-GPU single-process-multiple-devices with ncclGroup trace: This visualization shows a view on an AllReduce collective, where all ranks are managed by a single thread on the same process.}
-  \label{fig:single-gpu-single-process-ncclgroup-finalize}
-\end{figure}
+ncclAllReduce(sendBuff, recvBuff, BUFFER_SIZE, ncclFloat, ncclSum, rootComm, streams);
 
-TODO caption
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=\textwidth]{"images/03_communicators_01_allreduce/zoomed in.png"}
-    \caption{Single-GPU single-process-multiple-devices with ncclGroup trace: Zoomed in TODO}
-  \label{fig:single-gpu-single-process-ncclgroup-zoom}
-\end{figure}
+// ...
 
-TODO caption
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=\textwidth]{"images/03_communicators_01_allreduce/zoomed in 2 combined.png"}
-    \caption{Single-GPU single-process-multiple-devices with ncclGroup trace: Zoomed in TODO}
-  \label{fig:single-gpu-single-process-ncclgroup-zoom2}
-\end{figure}
+ncclCommFinalize(rootComm);
+ncclCommDestroy(rootComm);
+\end{lstlisting}
 
-
-TODO explain what we see
-
-\subsubsection{Multiple Processes, Multiple Devices per Process, Multiple Threads per Process}
-
-TODO explain "@multi gpu single thread" code
-
-TODO run this code (or a modified version with one additional warmup allreduce) on HPC
-
-TODO organize and save outputs locally 
-
-TODO visualize output
-
+The profiler API calls are visualized in Fig~\ref{fig:multi-gpu-single-thread-allreduce} and Fig~\ref{fig:multi-gpu-single-thread-show-proxystep}
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{"images/multi_gpu_single_thread/start to end - allreduce - 4 different threads + 4 proxy threads.png"}
-    \caption{Multi-GPU single-thread-per-device trace: This visualization shows the AllReduce collective being called on 4 different ranks. a single thread corresponds to each rank. First a small bar (row above the green bar), corresponds with the timestamp when the profiler \texttt{init()} function was called for each rank. since init is called during NCCL's internal communicator creation, this corresponds to roughly when the application called \texttt{ncclCommInitRank}. Afterwards the application called an \texttt{ncclAllReduce}. This is visible in the profiler output as when the green bar (\texttt{groupApi} event) starts. Just below is another tiny bar, which represents the start and stop of the \texttt{collApi} event. The yellow bar represent the timing where NCCL enqueued the kernel for launch on the GPU (\texttt{KernelLaunch} event). Two small bars below represnt the \texttt{group} and \texttt{coll} events. Besides these 4 threads, NCCL spawned a proxy progress thread for each rank as well. The red \texttt{ProxyCtrl} event in the row below until that point was indicating that the proxy progress thread was asleep. the new ProxyCtrl event right after is the time it took for the Proxy Progress thread to append proxy ops. Next, multiple proxy ops are starting to be progressed (\texttt{ProxyOps} events), which in \texttt{op->progress()} leads to starting \texttt{KernelCh} network activity. At some point the KernelCh acitvity is completed, the AllReduce collective is finished. The ProxyCtrl event thereafter indicates the proxy progress thread went back to sleep. It is possible to visualize which \texttt{coll} events across ranks belong to the same collective operation. This is indicated by the red line connecting the events, enabled by the equal valued \texttt{seqNum} field (provided in \texttt{eDescr} arg in profiler API \texttt{init()} function call) across ranks.}
+\includegraphics[width=0.87\textwidth]{"images/multi_gpu_single_thread/finalize alt (2).png"}
+    \caption{One device per thread: 
+      First, the profiler API \texttt{init} is called for each rank. 
+      This occurs during NCCL's internal communicator creation, 
+      roughly when the application calls \texttt{ncclCommInitRank}. 
+      Then, the application calls \texttt{ncclAllReduce}. 
+      This triggers many \texttt{stateEvent}, \texttt{stopEvent}, and \texttt{recordEventState} calls to the profiler API. 
+      First, the \texttt{groupApi} event starts (green bar). 
+      Below it, the startEvent and soon the stopEvent for the AllReduce \texttt{collApi} event are called. 
+      The yellow bar shows when NCCL enqueues the GPU kernel launch (\texttt{KernelLaunch} event). 
+      The two bars below represent the \texttt{group} and \texttt{coll} events. 
+      NCCL also spawns a proxy progress thread per rank, which makes additional profiler API calls. 
+      The first red \texttt{ProxyCtrl} event shows the proxy progress thread was asleep. 
+      Next, a new \texttt{ProxyCtrl} event shows time for the proxy thread to append proxy ops. 
+      Then, appended ops start progressing (\texttt{ProxyOps} events), which in \texttt{op->progress()} starts \texttt{ProxyStep} and \texttt{KernelCh} events that inform about low level network activity. 
+      Network activity evntually completes and the AllReduce collective finishes. 
+      The next \texttt{ProxyCtrl} event shows the proxy thread sleeping again. 
+      Finally, profiler \texttt{finalize} is called, which happens when the application cleans up NCCL communicators and no further communicators are tracked in the profiler in each respective thread.
+      Matching \texttt{coll} events across ranks can be identified for the same collective. 
+      This is shown by red lines connecting events with equal \texttt{seqNum} values (from \texttt{eDescr} in the profiler API \texttt{init()} call) across ranks
+    }
   \label{fig:multi-gpu-single-thread-allreduce}
 \end{figure}
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{"images/multi_gpu_single_thread/show proxystep.png"}
-  \caption{Multi-GPU single-thread-per-device trace: additionally showing proxy step events.}
+  \includegraphics[width=\textwidth]{"images/multi_gpu_single_thread/show proxystep alt.png"}
+  \caption{One device per thread: In Fig~\ref{fig:multi-gpu-single-thread-allreduce} \texttt{ProxyStep} events have been omitted for visual clarity. 
+  However, in multinode settings, many additional profiler API calls for proxyStep events are done, 
+  informing about the low level network steps in their event details. 
+  The blue dotted lines indicate the \texttt{parentObj} of each proxyStep event, 
+  which are the above proxyOp events.}
   \label{fig:multi-gpu-single-thread-show-proxystep}
 \end{figure}
 
+\subsubsection{Multiple Devices per Thread (ncclGroup)}\label{sec:multiple-devices-per-thread-ncclgroup}
+
+In this example, one NCCL thread manages all GPUs on the same node. 
+This is achieved by wrapping communication initialization 
+in \texttt{ncclGroupStart} and \texttt{ncclGroupEnd} for each managed GPU.
+In this orchestration setting, \textbf{NVIDIA's documentation states that all collective API calls should also be wrapped in ncclGroup.}
+
+Here, only one collective operation (per device) is inside the ncclGroup:
+
+\begin{lstlisting}[language=C]
+// broadcast a commId 
+
+// ...
+
+ncclGroupStart();
+for (int i=0; i<num_gpus; i++) {
+  int dev = devlist ? devlist[i] : i;
+  cudaSetDevice(dev);
+  ncclCommInitRankDev(comms+i, num_gpus,1, &uniqueId, i, dev, &config, __func__);
+}
+ncclGroupEndInternal();
+
+// alternatively to above method, NCCL provides the convenience function 
+// ncclCommInitAll();
+
+// ...
+
+ncclGroupStart();
+for (int i = 0; i < num_gpus; i++) {
+  ncclAllReduce( /* ... */ );
+}
+ncclGroupEnd();
+
+// ...
+
+for (int i = 0; i < num_gpus; i++) {
+  ncclCommDestroy(comms[i]);
+}
+\end{lstlisting}
+
+The full example is located in \textbf{/examples/03\_collectives/01\_allreduce/}.
+
+In this example case, the profiler API behavior remains largely the same:
+The one difference is that NCCL internally calls the profiler API groupApi event 
+only one time in total for grouped collectives within a thread.
+Otherwise all other events are processed as usual and are called their usual amount of times irrespective of \texttt{ncclGroup}.
+This is visualized in Fig~\ref{fig:single-gpu-single-process-ncclgroup-finalize}.
+This behaviour also holds true within a process. 
+It also holds when grouping (single) collectives for different communicators.
+
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{"images/multi_gpu_single_thread/no_arrows - no_same_lane - show proxystep combined.png"}
-\caption{Multi-GPU single-thread-per-device trace: proxy step events, but always on new lane chronologically, no arrows.}
-  \label{fig:multi-gpu-single-thread-proxystep2}
+  \includegraphics[width=\textwidth]{"images/ncclgroup 03_communicators_01_allreduce/init.png"}
+    \caption{Multiple devices per thread: Events from the proxy thread are omitted. Grouped collectives within a thread only trigger a single \texttt{GroupApi} event}
+  \label{fig:single-gpu-single-process-ncclgroup-finalize}
 \end{figure}
 
-\begin{figure}[H]
-\centering
-\includegraphics[width=\textwidth]{"images/multi_gpu_single_thread/finalize.png"}
-\caption{Multi-GPU single-thread-per-device trace: from \texttt{init} call until \texttt{finalize} call (a small bar to the very right in the slightly darker top row).}
-\label{fig:multi-gpu-single-thread-finalize}
-\end{figure}
+\subsubsection{One Device per Thread \& Grouped Collectives}
+In this example, the setting is such that only a single GPU is managed by a thread,
+but multiple collective operations are grouped (i.e. to optimize communication efficiency):
 
-TODO explain what we see
+\begin{lstlisting}[language=C]
+// comm init
+ncclUniqueId rootId;
+if (myRank == 0) { ncclGetUniqueId(&rootId); }
+MPI_Bcast(&rootId, sizeof(ncclUniqueId), MPI_BYTE, 0, MPI_COMM_WORLD);
+ncclComm_t rootComm;
+ncclCommInitRank(&rootComm, nRanks, rootId, myRank);
 
-\subsubsection{Multiple Processes, Multiple Devices per Process, Single Threads per Process \& using ncclGroup}
+// collective ops
+ncclGroupStart();
+ncclAllReduce( /* ... */ );
+ncclBroadcast( /* ... */ );
+ncclReduce( /* ... */ );
+ncclAllGather( /* ... */ );
+ncclReduceScatter( /* ... */ );
+ncclGroupEnd();
+\end{lstlisting}
 
-skip this 
-
-TODO probably just need one of the multi process multi gpu per process examples.
-which one is better depends on whether 03\_collectives/01\_allreduce actually is single thread or multi threaded
-commInitAll is single threaded using ncclGroup
-
-\subsubsection{behavior when utilizing ncclGroup for collective operations}
-
-TODO explain node environment setup
-
-TODO add selective screenshots of interesting things,
-
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=\textwidth]{"images/ncclGroup/grouped broadcast allreduce across different comms (all processes).png"}
-  \caption{Multi-GPU multiple communicators per process with grouped collectives: here 6 different communicator cliques across 4 processes are shown. their collective operations are grouped together with \texttt{ncclGroupStart} and \texttt{ncclGroupEnd}. Only a single \texttt{GroupApi} event happens per process.}
-  \label{fig:multi-gpu-multi-comm-per-process-ncclgroup}
-\end{figure}
-
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=\textwidth]{"images/ncclGroup/grouped broadcast allreduce across different comms same process.png"}
-  \caption{Multi-GPU multiple communicators per process with grouped collectives: View of just a single process. The \texttt{CollApi} events at the start show that they have the same GroupApi event as \texttt{parentObj}. However each rank still emits their own \texttt{KernelLaunch} event.}
-  \label{fig:multi-gpu-multi-comm-per-process-ncclgroup-1-process}
-\end{figure}
-
-like some ncclGroup stuff,
-multi level split
-intereweaved stuff
-
-TODO explain what we see
-
-TODO go back up and explain the important "@stress test" code. and show snippets and/or summarize (like for 1st simple example)
-
-TODO if not run on HPC in useful format yet, run this code on HPC
-
-TODO organize and save outputs locally 
-
-\subsection{What is possible with the Profiler Plugin API? Considerations and Pitfalls for (logging, running metrics, CUPTI, \ldots) when writing the plugin - section title WIP }
-
-TODO
-Logging. is this even worth talking about?
+The behavior changes can be described as follow:
 \begin{itemize}
-  \item Logging function from \texttt{init} (TODO)
-  \item Code snippet: custom logging infrastructure, timestamping
+  \item single groupApi event per thread
+  \item single KernelLaunch event per thread
+  \item single group event per thread
 \end{itemize}
 
-TODO
-Tracking \& running metrics
-\begin{quote}
-  Due to the asynchronous nature of NCCL operations, events associated with collectives and point-to-point are not easy to delimit precisely. \texttt{stopEvent} for collectives simply indicates to the profiler that the collective has been enqueued. Without proxy and/or kernel activity the plugin cannot determine when a collective ends. With proxy/kernel events enabled, the plugin can estimate when it ends.
-\end{quote}
-(slightly rephrased from \textbf{/ext-profiler/README.md})
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{"images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter.png"}
+  \caption{one GPU per thread with grouped collectives: multiple collective calls are grouped together and nccl does only a single kernel launch per thread.}
+  \label{fig:one-gpu-per-thread-grouped-collectives}
+\end{figure}
+
+\iffalse
+\subsubsection{Multiple Devices per Thread and grouped collectives utilizting \texttt{ncclGroupStart} and \texttt{ncclGroupEnd}}
+
+In this setting, ncclGroup is used to manage multiple GPU by one thread
+\textbf{and} multiple collective operations are within a group.
+This is almost the same example as in the case for
+\hyperref[sec:multiple-devices-per-thread-ncclgroup]{Multiple Devices per Thread (ncclGroup)},
+but with additional collectives inside the ncclGroup:
+
+\begin{lstlisting}[language=C]
   
-
-void* parentObj
-
-if the plugin developer wants utilize this field, they should ensure that potential address reuse does not create ambiguity to what the parentObj was originally pointing to. Custom memory management is advised.
-This field is useful when trying to understand which user API call triggered which events of lower level operations or activity such as network activity.
-
-TODO add picture
-
-
-seqNumber
-
-When profiling is enabled, NCCL counts the number of calls for each type of collective function per communicator.
-
-/src/include/comm.h
-\begin{lstlisting}[language=C]
-struct ncclComm {
-  uint64_t seqNumber[NCCL_NUM_FUNCTIONS];
-  /* other fields */
-}
+  // ...
+  
+  ncclGroupStart();
+  for (int i = 0; i < num_gpus; i++) {
+    ncclAllReduce( /* ... */ );
+    ncclAllReduce( /* ... */ );
+    ncclBroadcast( /* ... */ );
+  }
+  ncclGroupEnd();
+  
+  // ...
+  
 \end{lstlisting}
 
-/src/plugin/profiler.cc
-\begin{lstlisting}[language=C]
-ncclResult_t ncclProfilerStartTaskEvents(struct ncclKernelPlan* plan) {
-  /* other code */
-  __atomic_fetch_add(&plan->comm->seqNumber[ct->func], 1, __ATOMIC_RELAXED);
-  /* other code */
-}
-\end{lstlisting}
-
-This value is present in the eDescr for collective events and can be used to identify which collectives operations belong together across processes.
-
-TODO add picture of collectives seqNum
-
-
-PXN
-
-Unless Setting the environment variable \texttt{NCCL\_PXN\_DISABLE}=0 (default 1), due to PXN (PCIe x NVLink) some proxy ops may be progressed in a proxy thread from another process, different to the one that originally generated the operation 
-Then \texttt{parentObj} in \texttt{eDescr} is not safe to dereference; the \texttt{eDescr} for \texttt{ProxyOp} events includes the originator's PID, which the profiler can match against the local PID. 
-The \texttt{eDescr} for \texttt{ProxyStep} does not provide this field. However a workaround is possible:
-
-The passed \texttt{context} object in \texttt{startEvent()} is also unsafe to dereference due to PXN. the profiler plugin developer may internally track initialized contexts and whether the passed \texttt{context} belongs to the local process. This is also indicative of PXN.
-
-TODO: fact check if context is actually unsafe to deref? from code it looks like it is (context is read from pool - which iirc is posted to by potentially the originating process, not the progressing proxy thread process?)
-looking at inspector plugin implementation, it casts the passed context in startEvent(), but doesnt dereference it. so it doesnt crash.
-looking at example plugin implementation, it dereferences it in startEvent(), which is why it crashes.
-
-TODO verify this behavior one more time: slurm 2732796
-
-TODO
 \begin{itemize}
-  \item Code snippet: example CRUD of custom context object
-  \item Code snippet: example CRUD of custom event object
+  \item single groupApi event
+  \item single KernelLaunch event
+  \item single group event
 \end{itemize}
 
-TODO
-Kernel tracing with CUPTI
-\begin{itemize}
-  \item CUPTI extension ID mechanism briefly explained
-  \item Code snippet: where to CUPTI init/cleanup and usage
-\end{itemize}
+TODO run 03\_example\_01\_allreduce++ 
+(same, except its group(allreduce allreduce broadcast))
+slurm 2798216
 
-TODO Changing profiling behaviour at runtime (TODO: check example\_profiler, inspector)
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.9\textwidth]{"images/ncclgroup 03_communicators_01_allreduce++/init, 2 api calls alt.png"}
+  \caption{Multiple GPUs per thread: When collectives are grouped, only a single GroupApi event for all ranks managed by the thread is emitted. For each rank a single Kernel for the grouped collective operations is launched. All individual \texttt{CollectiveApi} and \texttt{Collective} events are emitted. This also holds true within a process.}
+  \label{fig:multi-gpu-per-thread-grouped-collectives}
+\end{figure}
 
-TODO commId hierarchical behavior.
-not so important.
-for split and shrink with ncclCommInitRankConfig
+
+TODO this behaviour holds in thread/process/comm combinations how?
+\fi
 
 \subsection{Performance and scalability of the Profiler Plugin API}
  
-Following Experiments were run to assess the performance and scalability of profiler plugins.
+Experiments were run to assess the performance and scalability of profiler plugins.
 
-TODO
-\begin{itemize}
-  \item synthetic performance measuring applications
-  \item real application
-\end{itemize}
-
-
-TODO check out potential use of
-
-\begin{lstlisting}[language=C]
-@profiler (line 120 - 182)
-#define ENABLE_TIMER 0
-#include "timer.h"
-
-#if ENABLE_TIMER
-// These counters are used to measure profiler overheads for different part of the code
-// These counters are only useful/meaningful in controlled test environments where there
-// is only one thread updating each set of counters, i.e., every communicator has its
-// own proxy thread and the network uses only one thread to make progress (this is true
-// for net_ib plugin but might not be true for net_socket plugin).
-...
-\end{lstlisting}
-
-setup
-
-empty profiler: initializes dummy context struct, returns NULL for event handles, tracks all events 4095 (including those for network activity)
+The profiler used for the experiments initializes a dummy context struct, returns NULL for event handles and tracks all events 4095 (including those for network activity).
 \begin{lstlisting}[language=C]
 // an 'empty' NCCL Profiler Plugin
 
@@ -1437,87 +1375,266 @@ ncclProfiler_v5_t ncclProfiler_v5 = {
 };
 \end{lstlisting}
 
+For testing the performance overhead in collective and P2P operations, \textbf{nccl-tests} from NVIDIA was used\footnote{\url{https://github.com/NVIDIA/nccl-tests}}.
 
-application:
+The applications were launched with follwing test parameters:
+message size 64\,B, 1\,000\,000 iterations per size, 100 warmup iterations. 
+Single-node jobs used one node and 4 GPUs; 
+multi-node jobs used 2 nodes, 4 GPUs per node, 8 MPI ranks in total. 
+For each experiment, the application was run once without the profiler and once with the empty profiler plugin.
 
-TODO run mainly nccl-tests for synthetic. easily accessible so easier to reproduce
+The Table~\ref{tab:profiler-overhead} shows the average latency per operation (time in $\mu$s) across iterations.
+The empty profiler adds roughly 8 to 9\,$\mu$s overhead per operation in single-node runs (4 GPUs), but introduces negligible overhead in multi-node runs (8 GPUs across 2 nodes).
 
-synthetic - TODO add application code in an appendix section or something, if there are some custom apps that are worthy but missing in nccl-tests
+\begin{table}[H]
+\centering
+\caption{Profiler overhead: nccl-tests \texttt{sendrecv\_perf} (P2P) and \texttt{all\_reduce\_perf} (collectives). Latency averaged over 1M iterations.}
+\label{tab:profiler-overhead}
+\begin{tabular}{llrr}
+\hline
+Test & Environment & Without profiler ($\mu$s) & With profiler ($\mu$s) \\
+\hline
+P2P (\texttt{sendrecv\_perf}) & Single-node (4 GPUs) & 14.3 & 23.88 \\
+ & Multi-node (2$\times$4 GPUs) & 13.05 & 12.95 \\
+\hline
+Collectives (\texttt{all\_reduce\_perf}) & Single-node (4 GPUs) & 14.96 & 23.29 \\
+ & Multi-node (2$\times$4 GPUs) & 17.99 & 18.34 \\
+\hline
+\end{tabular}
+\end{table}
 
-realistic - TODO maxtext zum laufen bringen
-
-singlenode
-\begin{itemize}
-  \item coll singlenode (1mil iters, 100 warmup iters):
-  \begin{itemize}
-    \item sbatch run 1: 7.64 µs overhead. averaged 26.40 µs per iter w/o. 34.04 µs w/ profiler 
-  \end{itemize}
-
-  \item p2p singlenode (1mil iters 100 warmup iters):
-  \begin{itemize}
-    \item sbatch run 1: 7.26 µs overhead. averaged 26.66 µs per iter w/o. 33.92 µs w/ profiler 
-  \end{itemize}
-
-  \item commops singlenode (100 iters, 10 warmup iters):
-  \begin{itemize}
-    \item sbatch run 1: check slurm ...
-  \end{itemize}
-\end{itemize}
-
+\iffalse
 multinode
 \begin{itemize}
-  \item coll multinode (1mil iters, 100 warmup iters):
-  \begin{itemize}
-    \item sbatch run 1: 0.33 µs overhead. averaged 22.12 µs per iter w/o. 22.45 µs w/ profiler
-  \end{itemize}
-
-  \item p2p multinode (1mil iters 100 warmup iters):
-  \begin{itemize}
-    \item sbatch run 1: not measurable. averaged 21.17 µs per iter w/o. 20.82 µs w/ profiler 
-  \end{itemize}
-
   \item commops multinode (100 iters, 10 warmup iters):
   \begin{itemize}
     \item sbatch run 1: "init, destroy" experiment
     \begin{itemize}
       \item 1790.05 µs overhead. averaged 577455.37 µs per iter w/o. 579245.42 µs w/ profiler
     \end{itemize}
-    \item sbatch run 1: "init, split, destroy" experiment
+    \item sbatch run 1: "init once, split, destroy" experiment
     \begin{itemize}
       \item 1546.16 µs overhead. averaged 1079679.93 µs per iter w/o. 1078133.77 µs w/ profiler
     \end{itemize}
   \end{itemize}
 \end{itemize}
 
+TODO describe sbatch run flags for nccl-tests
 
-TODO run experiments multiple times?
+There are two experiments for communication operations. 
+First, the time of \texttt{ncclCommInit} and \texttt{ncclCommDestroy} are tested.
+Second, initialization happens once and \texttt{ncclCommSplit} and \texttt{ncclCommDestroy} are tested:
+
+synthetic - TODO add application code in an appendix section or something
 
 
-TODO
-accuracy and reliability/consistency of the the timings of profiler api calls from nccl
+\begin{lstlisting}[language=C]
+uint64_t start_time = get_time_ns();
+for (int iter = 0; iter < num_iterations; iter++) {
+  ncclUniqueId id;
+  if (mpi_rank == 0) { ncclGetUniqueId(&id); }
+  MPI_Bcast((void *)&id, sizeof(id), MPI_BYTE, 0, MPI_COMM_WORLD);
 
-Using the profiler plugin when scaled to many gpus across multiple nodes is effortless and did not require any changes for the ran examples and experiments.
+  ncclComm_t comm;
+  ncclCommInitRank(&comm, mpi_size, id, mpi_rank);
+  ncclCommDestroy(comm);
+}
+uint64_t end_time = get_time_ns();
+\end{lstlisting}
+
+\begin{lstlisting}[language=C]
+  ncclUniqueId id;
+  if (mpi_rank == 0) { ncclGetUniqueId(&id); }
+  MPI_Bcast((void *)&id, sizeof(id), MPI_BYTE, 0, MPI_COMM_WORLD);
+  
+  ncclComm_t parent_comm;
+  ncclCommInitRank(&parent_comm, mpi_size, id, mpi_rank);
+
+  uint64_t start_time = get_time_ns();
+  for (int iter = 0; iter < num_iterations; iter++) {
+    ncclComm_t comm;
+
+    int color = mpi_rank % 2;
+    int key = mpi_rank;
+
+    ncclCommSplit(parent_comm, color, key, &child_comm, NULL)
+    ncclCommDestroy(comm);
+  }
+  uint64_t end_time = get_time_ns();
+\end{lstlisting}
+\fi
+
+Using the profiler plugin when scaled to many gpus across multiple nodes is effortless 
+and did not require any changes in the profiler plugin for the used code examples and experiments.
 
 % ---------------------------------------------------------------------------
-\section{Potential Integration with Score-P}
+\section{Discussion}
 % ---------------------------------------------------------------------------
 
-TODO
-Substrate Plugin Route
+\subsection{Considerations for developers of a Profiler Plugin}
 
-TODO
-Metric Plugin Route?
+\paragraph{Logging.} TODO
+is this even worth talking about? Code snippet: custom logging infrastructure, timestamping
+
+example records may look like this 
+\begin{lstlisting}
+{"type":"ProfilerLifecycle","func":"ProfilerInit","gpuUuid":"785dffffffb4ffffffad-0fffffff87-ffff","commId":16819983883469885264,"rank":0,"start":{"ts":9222912570430.104,"pid":990077,"tid":990096},"stop":{"ts":9222912570430.104,"pid":990077,"tid":990096},"duration":0.0,"details":{"nranks":4,"commName":"","eventMask":4095}}
+{"recordType":"state","eventAddr":"0x7f6813f084d8","ts":9222912622786.445,"name":"EndGroupApiStart","id":23,"pid":990077,"tid":990077}
+{"recordType":"event","type":"ncclProfileCollApi","gpuUuid":"785dffffffb4ffffffad-0fffffff87-ffff","commId":16819983883469885264,"rank":0,"start":{"ts":9222912622801.756,"pid":990077,"tid":990077},"stop":{"ts":9222912622811.686,"pid":990077,"tid":990077},"duration":9.930,"parentObj":"0x7f6813f084d8","eventAddr":"0x7f6813f08578","ctx":"0x7f6813eccfa0","details":{"func":"AllReduce","count":33554432,"dtype":"ncclFloat32","root":0,"stream":"0x4bdd010","graphCaptured":false}}
+\end{lstlisting}
+
+
+\paragraph{Profiler Visualization.} TODO
+Building a visualization tool on top of a nccl profiler plugin is simple.
+For the purpose providing helpful visualizations in this report, such a visualizer has been developed
+The profiler plugin logs API calls and events as jsonl, which feed the visualization tool.
+
+\paragraph{Tracking \& running metrics.} TODO
+is this even worth talking about?
+\begin{quote}
+  Due to the asynchronous nature of NCCL operations, events associated with collectives and point-to-point are not easy to delimit precisely. 
+  \texttt{stopEvent} for collectives simply indicates to the profiler that the collective has been enqueued. 
+  Without proxy and/or kernel activity the plugin cannot determine when a collective ends. 
+  With proxy/kernel events enabled, the plugin can estimate when it ends.
+\end{quote}
+(slightly rephrased from \textbf{/ext-profiler/README.md})
+
+
+\paragraph{Kernel tracing with CUPTI.}
+The CUPTI API provides functions to correlate application code regions with CUPTI activity
+via \texttt{cuptiActivityPushExternalCorrelationId} and \texttt{cuptiActivityPopExternalCorrelationId}.
+This can be handily integrated with the profiler API, whenever \texttt{KernelLaunch} events are started and stopped, 
+while continuously incrementing the correlation id in a thread-safe manner.
+Fig~\ref{fig:cupti-example} provides an example visualization of this method.
+Cupti can be initialized and cleaned up within the profiler plugin's own \texttt{init} and \texttt{finalize} functions.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{"images/ncclgroup stress test/cupti example.png"}
+  \caption{Illustration of CUPTI activity correlation with \texttt{KernelLaunch} events. Kernel activity is visualized as orange event bars.}
+  \label{fig:cupti-example}
+\end{figure}
+
+\paragraph{Correlating Collective Events with \texttt{seqNumber}.}
+When profiling is enabled, NCCL counts the number of calls for each type of collective function per communicator.
+
+/src/include/comm.h
+\begin{lstlisting}[language=C]
+struct ncclComm {
+  uint64_t seqNumber[NCCL_NUM_FUNCTIONS];
+  /* other fields */
+}
+\end{lstlisting}
+
+/src/plugin/profiler.cc
+\begin{lstlisting}[language=C]
+ncclResult_t ncclProfilerStartTaskEvents(struct ncclKernelPlan* plan) {
+  /* other code */
+  __atomic_fetch_add(&plan->comm->seqNumber[ct->func], 1, __ATOMIC_RELAXED);
+  /* other code */
+}
+\end{lstlisting}
+
+This value is present in the \texttt{eDescr} for collective events 
+and can be used to identify which collectives operations belong together across processes (see Fig~\ref{fig:phase-4-3rd-iter}).
+
+\paragraph{Tracing low level activity back to NCCL API calls with \texttt{parentObj}.}
+If the plugin developer wants utilize this field, 
+they should ensure that potential address reuse does not create ambiguity to what the parentObj was originally pointing to. 
+Custom memory management is advised.
+This field is useful when trying to understand which user API call triggered which events of lower level operations or activity such as network activity (see Fig~\ref{fig:phase-4-3rd-iter}).
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{"images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter.png"}
+  \caption{An example illustrating how \texttt{parentObj} and \texttt{seqNumber} can aid in understanding nccl collective operations.}
+  \label{fig:phase-4-3rd-iter}
+\end{figure}
+
+\paragraph{Process origin for profiler callbacks with PXN enabled.}
+Unless Setting the environment variable \texttt{NCCL\_PXN\_DISABLE}=0 (default 1), due to PXN (PCIe x NVLink) some proxy ops may be progressed in a proxy thread from another process, different to the one that originally generated the operation. 
+Then \texttt{parentObj} in \texttt{eDescr} is not safe to dereference; the \texttt{eDescr} for \texttt{ProxyOp} events includes the originator's PID, which the profiler can match against the local PID. 
+The \texttt{eDescr} for \texttt{ProxyStep} does not provide this field. However a workaround is possible:
+
+The passed \texttt{context} object in \texttt{startEvent} is also unsafe to dereference due to PXN. 
+the profiler plugin developer may internally track initialized contexts 
+and whether the passed \texttt{context} belongs to the local process. 
+This is also indicative of PXN.
+
+\paragraph{Tracking communicator parent--child relationships.}
+With the current Profiler plugin API, it is not possible to detect whether a communicator originates from another one 
+(e.g., via \texttt{ncclCommSplit} or \texttt{ncclCommShrink}).
+The plugin's \texttt{init} callback only receives a single communicator ID (\texttt{commId},
+which corresponds to \texttt{comm->commHash}), as well as \texttt{commName}, \texttt{nNodes}, \texttt{nRanks}, and \texttt{rank};
+there is no \texttt{parentCommId} or similar argument.
+In split/shrink, the \texttt{commHash} of the child node is calculated internally as a one-way digest of the \texttt{commHash} of the parent node and the split parameters (\texttt{splitCount}, \texttt{color}).
+Therefore, the relationship cannot be restored based on the ID alone.
+
+\subsection{Known limitations}
+
+Kernel event instrumentation uses counters exposed by the kernel to the host and the proxy progress thread. 
+Thus the proxy progress thread infrastructure is shared between network and profiler. 
+If the proxy is serving network requests, reading kernel profiling data can be delayed, causing loss of accuracy. 
+Similarly, under heavy CPU load and delayed scheduling of the proxy progress thread, accuracy can be lost.
+
+From profiler version 4, NCCL uses a per-channel ring buffer of 64 elements. 
+Each counter is complemented by two timestamps (ptimers) supplied by the NCCL kernel (start and stop of the operation in the kernel). 
+NCCL propagates these timestamps to the profiler plugin so it can convert them to the CPU time domain.
+
+(Source: \url{https://github.com/NVIDIA/nccl/tree/master/ext-profiler/README.md}
+
+\subsection{Potential Integration with Score-P}
+
+Score-P is a scalable measurement infrastructure for profiling,
+event tracing, and online analysis of parallel HPC applications\footnote{\url{https://scorepci.pages.jsc.fz-juelich.de/scorep-pipelines/docs/scorep-6.0/html/}}.
+It supports MPI, OpenMP, CUDA, and other paradigms, and produces OTF2 traces and CUBE4 profiles for tools such as Vampir and Scalasca.
+Developers can extend Score-P via plugins.
+
+\textbf{Substrate plugins} are loaded as \texttt{libscorep\_substrate\_\{name\}.so}
+and register callbacks for Score-P's internal runtime events (region entries, MPI calls, etc.).
+Substrate plugins are \emph{consumers} of events: they observe Score-P's event stream but do not inject new events.
+
+In contrast, the NCCL profiler plugin is callback-driven \emph{by NCCL}.
+NCCL loads it via \texttt{dlopen} and invokes \texttt{startEvent}, \texttt{stopEvent}, and \texttt{recordEventState}
+during collective and P2P operations.
+
+A potential integration strategy would involve writing a \textbf{dual-interface plugin:}
+A developer writes a shared library that simultaneously implements the NCCL profiler API and integrates with Score-P as a substrate plugin.
+Score-P loads the plugin as \texttt{libscorep\_substrate\_{\it nccl}.so}, 
+while NCCL loads it via the environment variable \texttt{NCCL\_PROFILER\_PLUGIN}.
+Although substrate plugins consume but do not produce events, the plugin could use Score-P's user instrumentation API
+(e.g., \texttt{SCOREP\_USER\_REGION\_BY\_NAME\_BEGIN}/\texttt{END})
+to inject Profiler Events (and by extension NCCL operations) as regions into Score-P's.
+When NCCL calls \texttt{startEvent} or \texttt{stopEvent}, the plugin converts those callbacks into Score-P events.
+The region name can be derived from the event descriptor (e.g., \texttt{collApi.func} for \texttt{ncclAllReduce}).
+The application must be compiled with Score-P instrumentation and linked against the Score-P measurement library;
+\texttt{NCCL\_PROFILER\_PLUGIN} points to the dual-interface library.
+
+In this design, NCCL drives the profiler and the profiler forwards events into Score-P. 
+NCCL collective operations then appear as regions in Score-P profiles and traces.
 
 % ---------------------------------------------------------------------------
-\section{Conclusion - What i have shown. Why would you use it? pros \& cons}
+\section{Conclusion}
 % ---------------------------------------------------------------------------
 
-\begin{itemize}
-  \item Customizable
-  \item May require maintenance / active development since NCCL is actively developed
-  \item Low overhead: NVIDIA advertises their \texttt{inspector} implementation as efficient enough for ``always-on'' in production
-\end{itemize}
+This feasibility study examined the NCCL Profiler Plugin API 
+and its suitability for integration with Score-P.
+The report provided background on NCCL and its design, 
+explained how the profiler plugin is detected and loaded,
+and described the API definition with its five core callbacks 
+\texttt{init}, \texttt{startEvent}, \texttt{stopEvent}, \texttt{recordEventState}, \texttt{finalize}.
+Code examples and visualizations illustrate the event flow from API calls to NCCL's internal profiler callbacks.
+Performance experiments showed that an empty profiler adds roughly 8--9\,$\mu$s overhead per operation in single-node runs 
+but introduces negligible overhead in multi-node runs, and scaling to many GPUs across nodes required no changes to the profiler plugin. 
+The discussion covered developer considerations, known limitations, and a potential integration strategy with Score-P.
 
+The NCCL Profiler API allows for highly customized plugins tailored to the analysis needs, 
+whether for simple timing, kernel tracing via CUPTI, or integration with external tools such as Score-P. 
+A notable advantage is its low overhead: NVIDIA advertises their \texttt{inspector} implementation (\textbf{/ext-profiler/inspector}) as efficient enough for ``always-on'' profiling in production. 
+On the downside, profiler plugins may require maintenance and active development, since NCCL is actively developed. 
+API versions evolve and new features are being introduced.
+
+\iffalse
 \subsection{NCCL\_DEBUG}
 
 \url{https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html#nccl-debug}
@@ -1529,25 +1646,6 @@ NCCL already comes with debug logging at various levels of granularity:
   \item Further options (v2.2.12 \texttt{NCCL\_DEBUG\_FILE}, v2.3.4 \texttt{NCCL\_DEBUG\_SUBSYS}, v2.26 timestamp format/levels)
   \item other profiling and tracing tools exists that are maintained by NVIDIA: nsight systems, nsight compute
 \end{itemize}
-
-\subsection{Known limitations}
-
-\begin{quote}
-Kernel event instrumentation uses counters exposed by the kernel to the host and the proxy progress thread. Thus the proxy progress thread infrastructure is shared between network and profiler. If the proxy is serving network requests, reading kernel profiling data can be delayed, causing loss of accuracy. Similarly, under heavy CPU load and delayed scheduling of the proxy progress thread, accuracy can be lost.
-
-From profiler version 4, NCCL uses a per-channel ring buffer of 64 elements. Each counter is complemented by two timestamps (ptimers) supplied by the NCCL kernel (start and stop of the operation in the kernel). NCCL propagates these timestamps to the profiler plugin so it can convert them to the CPU time domain.
-\end{quote}
-Source: \url{https://github.com/NVIDIA/nccl/tree/master/ext-profiler/README.md}
-
-\subsection{Summarize What i have shown TODO}
-TODO
-
-% ---------------------------------------------------------------------------
-\section{TODO}
-% ---------------------------------------------------------------------------
-
-\begin{itemize}
-  \item custom profiler code cleaning
-\end{itemize}
+\fi
 
 \end{document}
