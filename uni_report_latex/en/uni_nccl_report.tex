@@ -1196,7 +1196,7 @@ Below follows a full description of the calls to the profiler API induced by the
 First, the profiler API \texttt{init} is called for each rank. 
 This occurs during NCCL's internal communicator creation, 
 when the application calls \texttt{ncclCommInitRank}. 
-Next, when the application calls \texttt{ncclAllReduce},
+After the application calls \texttt{ncclAllReduce},
 many Profiler API calls to \texttt{stateEvent}, \texttt{stopEvent}, and \texttt{recordEventState} are triggered:
 Intially, startEvent for the \texttt{groupApi} (green bar) is called.
 Below it, the startEvent and soon the stopEvent for the AllReduce \texttt{collApi} event are called. 
