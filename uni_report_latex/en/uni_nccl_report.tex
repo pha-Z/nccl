@@ -473,9 +473,9 @@ The profiler API has changed multiple times with newer NCCL releases.
 NCCL features a fallback mechanism to load older struct versions.
 However one instance is known, where a profiler plugin being developed against the NCCL release 2.25.1 with Profiler API version 2, was unable to run with the latest NCCL release\footnote{\url{https://github.com/variemai/ncclsee}}.
 Around this time, the NCCL repository has undergone a refactor related to the profiler plugin.
-NCCL developers may be required to actively maintain older API versions, to ensure they safely work when old behaviour is getting deprecated 
-and do not unexpectedly get handed new features from new API versions, 
-of which the an older Profiler Plugin is not aware of (when faithfully implementing the old API version).
+% NCCL developers may be required to actively maintain older API versions, to ensure they safely work when old behaviour is getting deprecated 
+% and do not unexpectedly get handed new features from new API versions, 
+% of which the an older Profiler Plugin is not aware of (when faithfully implementing the old API version).
 
 \iffalse
 \begin{lstlisting}[style=ascii]
@@ -522,6 +522,7 @@ We show three participants: \emph{User}, \emph{NCCL}, and \emph{Profiler plugin}
 
 \begin{figure}[H]
 \centering
+% \scalebox{0.95}{%
 \begin{sequencediagram}
 \newthread{user}{User}
 \newinst[1.7]{nccl}{NCCL init.cc}
@@ -566,6 +567,7 @@ We show three participants: \emph{User}, \emph{NCCL}, and \emph{Profiler plugin}
   \end{callself}
 \end{call}
 \end{sequencediagram}%
+% }
 \caption{User API $\to$ NCCL communicator init $\to$ load profiler plugin and call \texttt{profiler->init}.}
 \label{fig:profiler-init}
 \end{figure}
