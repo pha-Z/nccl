@@ -1621,24 +1621,25 @@ for profiling and event tracing of HPC applications.
 It supports a number of analysis tools. 
 Currently, it works with Scalasca, Vampir, and Tau and is open for other tools 
 and produces OTF2 traces and CUBE4 profiles.
-Integrating NCCL into this Score-P allows developers 
+Integrating NCCL into Score-P allows developers 
 to see communication collectives alongside the application logic. 
 
 A prerequisite for distributed tracing is the unique identification of process groups. 
 NCCL achieves this via \texttt{ncclGetUniqueId}\footnote{\url{https://github.com/NVIDIA/nccl/tree/master/src/init.cc}} without a central coordinator. 
-It generates a handle containing 
+To establish a communicator, one process generates a handle containing
 a random 64-bit \texttt{magic} value from \texttt{/dev/urandom} 
 and the socket \texttt{address} of a new listening socket (IP, port), 
 whose port is chosen by the operating system. 
-Different MPI tasks or repeated calls in one process each get distinct random magic
-and distinct OS-assigned ports are assigned across a cluster, thus collisions are avoided in practice.
-Because of this, a Score-P integration can use these to define Process Groups. 
+This combination avoids collisions across a cluster, 
+ensuring the ID is globally unique in practice.
+Score-P integration can use these to accurately define Process Groups. 
 
 The integration could be achieved in two ways, 
 either using a direct Profiler API mapping 
 or via an indirect NVTX/CUPTI annotation:
 
-A direct integration would potentially involve implementing a NCCL profiler plugin that translates the startEvent and stopEvent callbacks into Score-P regions:
+A direct integration would potentially involve implementing a NCCL profiler plugin 
+that translates the \texttt{startEvent} and \texttt{stopEvent} callbacks into Score-P regions:
 The plugin maps NCCL event descriptors (e.g., ncclAllReduce) to Score-P regions using the instrumentation macros
 (e.g., \\\texttt{SCOREP\_USER\_REGION\_BY\_NAME\_BEGIN}/\texttt{END}).
 
@@ -1651,7 +1652,7 @@ and instead relies on Score-P's internal NVTX-to-OTF2 mapping logic.
 
 The plugin can utilize \texttt{cuptiActivityPush/PopExternalCorrelationId} to capture GPU activity 
 during the \texttt{startEvent} and \texttt{stopEvent} of \texttt{KernelLaunch} events, 
-while incrementing a thread-safe correlation ID (see Fig.~\ref{fig:cupti-example})
+while incrementing a thread-safe correlation ID (see Fig.~\ref{fig:cupti-example}).
 CUPTI can be initialized and cleaned up within the profiler plugin's \texttt{init} and \texttt{finalize} functions.
 
 \begin{figure}[H]

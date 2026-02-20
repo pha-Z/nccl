@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.28 (TeX Live 2025) (preloaded format=pdflatex 2026.1.30)  20 FEB 2026 14:02
+This is pdfTeX, Version 3.141592653-2.6-1.40.28 (TeX Live 2025) (preloaded format=pdflatex 2026.1.30)  20 FEB 2026 14:24
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -1193,20 +1193,20 @@ pdfTeX warning (ext4): destination with the same identifier (name{figure.12}) ha
                                                   \__shipout_drop_firstpage_...
 l.1603 
         <./images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter.png>] [26]
-Underfull \hbox (badness 10000) in paragraph at lines 1647--1647
+Underfull \hbox (badness 10000) in paragraph at lines 1648--1648
 [][][][]$\T1/pcr/m/n/9 https : / / nvidia . github . io / NVTX / doxygen / group _ _ _ m _ a _ r _ k _ e _ r _ s _ _ _ a _ n _ d _ _ _ r _ a _ n _ g _ e _ s .
  []
 
 <images/ncclgroup stress test/cupti example.png, id=587, 1061.1645pt x 484.81125pt>
 File: images/ncclgroup stress test/cupti example.png Graphic file (type png)
 <use images/ncclgroup stress test/cupti example.png>
-Package pdftex.def Info: images/ncclgroup stress test/cupti example.png  used on input line 1659.
+Package pdftex.def Info: images/ncclgroup stress test/cupti example.png  used on input line 1660.
 (pdftex.def)             Requested size: 452.96796pt x 206.94086pt.
 [27
 pdfTeX warning (ext4): destination with the same identifier (name{figure.13}) has been already used, duplicate ignored
 <argument> ...shipout:D \box_use:N \l_shipout_box 
                                                   \__shipout_drop_firstpage_...
-l.1678 
+l.1679 
         <./images/ncclgroup stress test/cupti example.png>] [28] (./uni_nccl_report.aux)
  ***********
 LaTeX2e <2025-11-01>
@@ -1222,7 +1222,7 @@ Here is how much of TeX's memory you used:
  1141 hyphenation exceptions out of 8191
  122i,11n,121p,11298b,2074s stack positions out of 10000i,1000n,20000p,200000b,200000s
 <c:/a/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/urw/courier/ucrb8a.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/urw/courier/ucrr8a.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/urw/helvetic/uhvb8a.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/urw/helvetic/uhvr8a.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/urw/times/utmb8a.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/urw/times/utmr8a.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/urw/times/utmri8a.pfb>
-Output written on uni_nccl_report.pdf (30 pages, 1953667 bytes).
+Output written on uni_nccl_report.pdf (30 pages, 1953623 bytes).
 PDF statistics:
  787 PDF objects out of 1000 (max. 8388607)
  700 compressed objects within 7 object streams
