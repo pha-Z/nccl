@@ -1,13 +1,22 @@
 \relax 
+\providecommand*\new@tpo@label[2]{}
 \providecommand \babel@aux [2]{\global \let \babel@toc \@gobbletwo }
 \@nameuse{bbl@beforestart}
+\catcode `"\active 
 \providecommand\hyper@newdestlabel[2]{}
 \providecommand\HyField@AuxAddToFields[1]{}
 \providecommand\HyField@AuxAddToCoFields[2]{}
-\babel@aux{english}{}
+\bibstyle{alpha}
+\babel@aux{american}{}
+\providecommand\BKM@entry[2]{}
+\BKM@entry{id=1,dest={73656374696F6E2E31},srcline={69}}{5C3337365C3337375C303030415C303030625C303030735C303030745C303030725C303030615C303030635C30303074}
+\BKM@entry{id=2,dest={73656374696F6E2E32},srcline={86}}{5C3337365C3337375C303030495C3030306E5C303030745C303030725C3030306F5C303030645C303030755C303030635C303030745C303030695C3030306F5C3030306E5C3030305C3034305C303030745C3030306F5C3030305C3034305C3030304E5C303030435C303030435C3030304C}
+\BKM@entry{id=3,dest={73756273656374696F6E2E322E31},srcline={96}}{5C3337365C3337375C303030435C3030306F5C3030306D5C303030705C303030615C303030725C303030695C303030735C3030306F5C3030306E5C3030305C3034305C303030745C3030306F5C3030305C3034305C3030304D5C303030505C30303049}
 \@writefile{toc}{\contentsline {section}{\numberline {1}Abstract}{2}{section.1}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {2}Introduction to NCCL}{2}{section.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Comparison to MPI}{3}{subsection.2.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Comparison to MPI}{2}{subsection.2.1}\protected@file@percent }
+\BKM@entry{id=4,dest={73756273656374696F6E2E322E32},srcline={103}}{5C3337365C3337375C303030525C303030655C3030306C5C303030655C303030765C303030615C3030306E5C303030745C3030305C3034305C3030304E5C303030435C303030435C3030304C5C3030305C3034305C303030695C3030306E5C303030745C303030655C303030725C3030306E5C303030615C3030306C5C30303073}
+\BKM@entry{id=5,dest={73656374696F6E2E33},srcline={445}}{5C3337365C3337375C303030505C303030725C3030306F5C303030665C303030695C3030306C5C303030655C303030725C3030305C3034305C303030505C3030306C5C303030755C303030675C303030695C3030306E}
 \@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Relevant NCCL internals}{3}{subsection.2.2}\protected@file@percent }
 \@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Thread creation: User API $\to $ NCCL internal init $\to $ create ProxyService $\to $ create ProxyProgress.}}{4}{figure.1}\protected@file@percent }
 \newlabel{fig:thread-creation}{{1}{4}{Thread creation: User API $\to $ NCCL internal init $\to $ create ProxyService $\to $ create ProxyProgress}{figure.1}{}}
@@ -15,51 +24,74 @@
 \newlabel{fig:proxy-post}{{2}{5}{Flow from User API to \texttt {ncclProxyPost}}{figure.2}{}}
 \@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces /src/proxy.cc \texttt  {ncclProxyProgress} progressing loop: progress ops, then get posted ops (or wait). }}{5}{figure.3}\protected@file@percent }
 \newlabel{fig:proxy-progress-loop}{{3}{5}{/src/proxy.cc \texttt {ncclProxyProgress} progressing loop: progress ops, then get posted ops (or wait)}{figure.3}{}}
+\BKM@entry{id=6,dest={73756273656374696F6E2E332E31},srcline={456}}{5C3337365C3337375C303030505C303030725C3030306F5C303030665C303030695C3030306C5C303030655C303030725C3030305C3034305C303030705C3030306C5C303030755C303030675C303030695C3030306E5C3030305C3034305C3030306C5C3030306F5C303030615C303030645C303030695C3030306E5C303030675C3030305C3034305C3030306D5C303030655C303030635C303030685C303030615C3030306E5C303030695C303030735C3030306D}
 \@writefile{toc}{\contentsline {section}{\numberline {3}Profiler Plugin}{6}{section.3}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Profiler plugin loading mechanism}{6}{subsection.3.1}\protected@file@percent }
+\BKM@entry{id=7,dest={73756273656374696F6E2E332E32},srcline={588}}{5C3337365C3337375C303030505C303030725C3030306F5C303030665C303030695C3030306C5C303030655C303030725C3030305C3034305C303030415C303030505C30303049}
 \@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces User API $\to $ NCCL communicator init $\to $ load profiler plugin and call \texttt  {profiler->init}.}}{7}{figure.4}\protected@file@percent }
 \newlabel{fig:profiler-init}{{4}{7}{User API $\to $ NCCL communicator init $\to $ load profiler plugin and call \texttt {profiler->init}}{figure.4}{}}
+\BKM@entry{id=8,dest={73756273756273656374696F6E2E332E322E31},srcline={618}}{5C3337365C3337375C303030695C3030306E5C303030695C30303074}
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Profiler API}{8}{subsection.3.2}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsubsection}{\numberline {3.2.1}init}{8}{subsubsection.3.2.1}\protected@file@percent }
+\BKM@entry{id=9,dest={73756273756273656374696F6E2E332E322E32},srcline={672}}{5C3337365C3337375C303030735C303030745C303030615C303030725C303030745C303030455C303030765C303030655C3030306E5C30303074}
 \@writefile{toc}{\contentsline {subsubsection}{\numberline {3.2.2}startEvent}{9}{subsubsection.3.2.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsubsection}{\numberline {3.2.3}stopEvent}{10}{subsubsection.3.2.3}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Flow from NCCL API calls to profiler events. In case of \texttt  {ncclGroupStart / ncclGroupEnd}. multiple events of everything (except GroupApi) are called. Internally, some Collectives (e.g. ncclAlltoAll) are implemented as multiple p2p ops, triggering many P2pApi and P2p events.}}{11}{figure.5}\protected@file@percent }
-\newlabel{fig:profiler-events}{{5}{11}{Flow from NCCL API calls to profiler events. In case of \texttt {ncclGroupStart / ncclGroupEnd}. multiple events of everything (except GroupApi) are called. Internally, some Collectives (e.g. ncclAlltoAll) are implemented as multiple p2p ops, triggering many P2pApi and P2p events}{figure.5}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces \texttt  {ncclProxyProgress}: progressOps emits ProxyStep/KernelCh/NetPlugin events. getPostedOps emits ProxyOp events. Several events ProxyCtrl are also emitted}}{12}{figure.6}\protected@file@percent }
-\newlabel{fig:proxy-event-emission}{{6}{12}{\texttt {ncclProxyProgress}: progressOps emits ProxyStep/KernelCh/NetPlugin events. getPostedOps emits ProxyOp events. Several events ProxyCtrl are also emitted}{figure.6}{}}
-\@writefile{toc}{\contentsline {subsubsection}{\numberline {3.2.4}recordEventState}{13}{subsubsection.3.2.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsubsection}{\numberline {3.2.5}finalize}{13}{subsubsection.3.2.5}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces User API $\to $ \texttt  {commReclaim} $\to $ \texttt  {finalize} $\to $ plugin unload.}}{14}{figure.7}\protected@file@percent }
-\newlabel{fig:profiler-finalize}{{7}{14}{User API $\to $ \texttt {commReclaim} $\to $ \texttt {finalize} $\to $ plugin unload}{figure.7}{}}
-\@writefile{toc}{\contentsline {subsubsection}{\numberline {3.2.6}name}{14}{subsubsection.3.2.6}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {4}Code examples and visualizations}{14}{section.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}One Device per Thread}{16}{subsection.4.1}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {8}{\ignorespaces One device per thread: A visualization of the calls generated to the Profiler API, starting from communicator creation, followed by a collective operation and communicator destruction. \texttt  {ProxyStep} events have been omitted for visual clarity, see Fig.~\ref {fig:multi-gpu-single-thread-show-proxystep} for a depiction.}}{17}{figure.8}\protected@file@percent }
-\newlabel{fig:multi-gpu-single-thread-allreduce}{{8}{17}{One device per thread: A visualization of the calls generated to the Profiler API, starting from communicator creation, followed by a collective operation and communicator destruction. \texttt {ProxyStep} events have been omitted for visual clarity, see Fig.~\ref {fig:multi-gpu-single-thread-show-proxystep} for a depiction}{figure.8}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {9}{\ignorespaces One device per thread: In Fig.~\ref {fig:multi-gpu-single-thread-allreduce} \texttt  {ProxyStep} events have been omitted for visual clarity. However, in multinode settings, many additional profiler API calls for proxyStep events happen, informing about the low level network steps in their event details via \texttt  {recordEventState} (indicated as red circles above each of the event bars). The blue dotted lines indicate the \texttt  {parentObj} of each proxyStep event, which are the above proxyOp events.}}{18}{figure.9}\protected@file@percent }
-\newlabel{fig:multi-gpu-single-thread-show-proxystep}{{9}{18}{One device per thread: In Fig.~\ref {fig:multi-gpu-single-thread-allreduce} \texttt {ProxyStep} events have been omitted for visual clarity. However, in multinode settings, many additional profiler API calls for proxyStep events happen, informing about the low level network steps in their event details via \texttt {recordEventState} (indicated as red circles above each of the event bars). The blue dotted lines indicate the \texttt {parentObj} of each proxyStep event, which are the above proxyOp events}{figure.9}{}}
-\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.1.1}Multiple Devices per Thread (ncclGroup)}{18}{subsubsection.4.1.1}\protected@file@percent }
-\newlabel{sec:multiple-devices-per-thread-ncclgroup}{{4.1.1}{18}{Multiple Devices per Thread (ncclGroup)}{subsubsection.4.1.1}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {10}{\ignorespaces Multiple devices per thread: Events from the proxy thread as well as init and finalize calls are omitted. Collective API calls from multiple GPUs managed by a single thread only trigger a single \texttt  {GroupApi} event.}}{20}{figure.10}\protected@file@percent }
-\newlabel{fig:single-gpu-single-process-ncclgroup-finalize}{{10}{20}{Multiple devices per thread: Events from the proxy thread as well as init and finalize calls are omitted. Collective API calls from multiple GPUs managed by a single thread only trigger a single \texttt {GroupApi} event}{figure.10}{}}
-\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.1.2}Aggregated operations}{20}{subsubsection.4.1.2}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {11}{\ignorespaces one GPU per thread with aggregated operations: multiple collective calls are grouped together and nccl does only a single kernel launch per thread.}}{21}{figure.11}\protected@file@percent }
-\newlabel{fig:one-gpu-per-thread-grouped-collectives}{{11}{21}{one GPU per thread with aggregated operations: multiple collective calls are grouped together and nccl does only a single kernel launch per thread}{figure.11}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {5}Performance and scalability of the Profiler Plugin API}{21}{section.5}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Profiler overhead: nccl-tests \texttt  {sendrecv\_perf} (P2P) and \texttt  {all\_reduce\_perf} (collectives). Latency averaged over 1M iterations.}}{23}{table.1}\protected@file@percent }
-\newlabel{tab:profiler-overhead}{{1}{23}{Profiler overhead: nccl-tests \texttt {sendrecv\_perf} (P2P) and \texttt {all\_reduce\_perf} (collectives). Latency averaged over 1M iterations}{table.1}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {6}Discussion}{23}{section.6}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Considerations for developers of a Profiler Plugin}{23}{subsection.6.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Profiler Visualization.}{23}{section*.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Correlating Collective Events with \texttt  {seqNumber}.}{23}{section*.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Tracing low level activity back to NCCL API calls with \texttt  {parentObj}.}{24}{section*.4}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {12}{\ignorespaces An example illustrating how \texttt  {parentObj} and \texttt  {seqNumber} can be used to better understand the timing of concurrent collective operations.}}{24}{figure.12}\protected@file@percent }
-\newlabel{fig:phase-4-3rd-iter}{{12}{24}{An example illustrating how \texttt {parentObj} and \texttt {seqNumber} can be used to better understand the timing of concurrent collective operations}{figure.12}{}}
-\@writefile{toc}{\contentsline {paragraph}{Process origin for profiler callbacks with PXN enabled.}{24}{section*.5}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Tracking communicator parent--child relationships.}{24}{section*.6}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}Known limitations}{25}{subsection.6.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Potential Integration with Score-P}{25}{subsection.6.3}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {13}{\ignorespaces CUPTI activity is visualized as orange event bars. With a unique correlation Id, it is possible to trace the activity back to \texttt  {KernelLaunch} events}}{26}{figure.13}\protected@file@percent }
-\newlabel{fig:cupti-example}{{13}{26}{CUPTI activity is visualized as orange event bars. With a unique correlation Id, it is possible to trace the activity back to \texttt {KernelLaunch} events}{figure.13}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {7}Conclusion}{26}{section.7}\protected@file@percent }
-\gdef \@abspage@last{27}
+\BKM@entry{id=10,dest={73756273756273656374696F6E2E332E322E33},srcline={733}}{5C3337365C3337375C303030735C303030745C3030306F5C303030705C303030455C303030765C303030655C3030306E5C30303074}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {3.2.3}stopEvent}{11}{subsubsection.3.2.3}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Flow from NCCL API calls to profiler events. In case of \texttt  {ncclGroupStart / ncclGroupEnd}. multiple events of everything (except GroupApi) are called. Internally, some Collectives (e.g. ncclAlltoAll) are implemented as multiple p2p ops, triggering many P2pApi and P2p events.}}{12}{figure.5}\protected@file@percent }
+\newlabel{fig:profiler-events}{{5}{12}{Flow from NCCL API calls to profiler events. In case of \texttt {ncclGroupStart / ncclGroupEnd}. multiple events of everything (except GroupApi) are called. Internally, some Collectives (e.g. ncclAlltoAll) are implemented as multiple p2p ops, triggering many P2pApi and P2p events}{figure.5}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces \texttt  {ncclProxyProgress}: progressOps emits ProxyStep/KernelCh/NetPlugin events. getPostedOps emits ProxyOp events. Several events ProxyCtrl are also emitted}}{13}{figure.6}\protected@file@percent }
+\newlabel{fig:proxy-event-emission}{{6}{13}{\texttt {ncclProxyProgress}: progressOps emits ProxyStep/KernelCh/NetPlugin events. getPostedOps emits ProxyOp events. Several events ProxyCtrl are also emitted}{figure.6}{}}
+\BKM@entry{id=11,dest={73756273756273656374696F6E2E332E322E34},srcline={1030}}{5C3337365C3337375C303030725C303030655C303030635C3030306F5C303030725C303030645C303030455C303030765C303030655C3030306E5C303030745C303030535C303030745C303030615C303030745C30303065}
+\BKM@entry{id=12,dest={73756273756273656374696F6E2E332E322E35},srcline={1042}}{5C3337365C3337375C303030665C303030695C3030306E5C303030615C3030306C5C303030695C3030307A5C30303065}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {3.2.4}recordEventState}{14}{subsubsection.3.2.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {3.2.5}finalize}{14}{subsubsection.3.2.5}\protected@file@percent }
+\BKM@entry{id=13,dest={73756273756273656374696F6E2E332E322E36},srcline={1103}}{5C3337365C3337375C3030306E5C303030615C3030306D5C30303065}
+\BKM@entry{id=14,dest={73656374696F6E2E34},srcline={1109}}{5C3337365C3337375C303030435C3030306F5C303030645C303030655C3030305C3034305C303030655C303030785C303030615C3030306D5C303030705C3030306C5C303030655C303030735C3030305C3034305C303030615C3030306E5C303030645C3030305C3034305C303030765C303030695C303030735C303030755C303030615C3030306C5C303030695C3030307A5C303030615C303030745C303030695C3030306F5C3030306E5C30303073}
+\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces User API $\to $ \texttt  {commReclaim} $\to $ \texttt  {finalize} $\to $ plugin unload.}}{15}{figure.7}\protected@file@percent }
+\newlabel{fig:profiler-finalize}{{7}{15}{User API $\to $ \texttt {commReclaim} $\to $ \texttt {finalize} $\to $ plugin unload}{figure.7}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {3.2.6}name}{15}{subsubsection.3.2.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4}Code examples and visualizations}{15}{section.4}\protected@file@percent }
+\BKM@entry{id=15,dest={73756273656374696F6E2E342E31},srcline={1184}}{5C3337365C3337375C3030304F5C3030306E5C303030655C3030305C3034305C303030445C303030655C303030765C303030695C303030635C303030655C3030305C3034305C303030705C303030655C303030725C3030305C3034305C303030545C303030685C303030725C303030655C303030615C30303064}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}One Device per Thread}{17}{subsection.4.1}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {8}{\ignorespaces One device per thread: A visualization of the calls generated to the Profiler API, starting from communicator creation, followed by a collective operation and communicator destruction. \texttt  {ProxyStep} events have been omitted for visual clarity, see Fig.~\ref {fig:multi-gpu-single-thread-show-proxystep} for a depiction.}}{18}{figure.8}\protected@file@percent }
+\newlabel{fig:multi-gpu-single-thread-allreduce}{{8}{18}{One device per thread: A visualization of the calls generated to the Profiler API, starting from communicator creation, followed by a collective operation and communicator destruction. \texttt {ProxyStep} events have been omitted for visual clarity, see Fig.~\ref {fig:multi-gpu-single-thread-show-proxystep} for a depiction}{figure.8}{}}
+\BKM@entry{id=16,dest={73756273756273656374696F6E2E342E312E31},srcline={1253}}{5C3337365C3337375C3030304D5C303030755C3030306C5C303030745C303030695C303030705C3030306C5C303030655C3030305C3034305C303030445C303030655C303030765C303030695C303030635C303030655C303030735C3030305C3034305C303030705C303030655C303030725C3030305C3034305C303030545C303030685C303030725C303030655C303030615C303030645C3030305C3034305C3030305C3035305C3030306E5C303030635C303030635C3030306C5C303030475C303030725C3030306F5C303030755C303030705C3030305C303531}
+\@writefile{lof}{\contentsline {figure}{\numberline {9}{\ignorespaces One device per thread: In Fig.~\ref {fig:multi-gpu-single-thread-allreduce} \texttt  {ProxyStep} events have been omitted for visual clarity. However, in multinode settings, many additional profiler API calls for proxyStep events happen, informing about the low level network steps in their event details via \texttt  {recordEventState} (indicated as red circles above each of the event bars). The blue dotted lines indicate the \texttt  {parentObj} of each proxyStep event, which are the above proxyOp events.}}{19}{figure.9}\protected@file@percent }
+\newlabel{fig:multi-gpu-single-thread-show-proxystep}{{9}{19}{One device per thread: In Fig.~\ref {fig:multi-gpu-single-thread-allreduce} \texttt {ProxyStep} events have been omitted for visual clarity. However, in multinode settings, many additional profiler API calls for proxyStep events happen, informing about the low level network steps in their event details via \texttt {recordEventState} (indicated as red circles above each of the event bars). The blue dotted lines indicate the \texttt {parentObj} of each proxyStep event, which are the above proxyOp events}{figure.9}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.1.1}Multiple Devices per Thread (ncclGroup)}{19}{subsubsection.4.1.1}\protected@file@percent }
+\newlabel{sec:multiple-devices-per-thread-ncclgroup}{{4.1.1}{19}{Multiple Devices per Thread (ncclGroup)}{subsubsection.4.1.1}{}}
+\BKM@entry{id=17,dest={73756273756273656374696F6E2E342E312E32},srcline={1307}}{5C3337365C3337375C303030415C303030675C303030675C303030725C303030655C303030675C303030615C303030745C303030655C303030645C3030305C3034305C3030306F5C303030705C303030655C303030725C303030615C303030745C303030695C3030306F5C3030306E5C30303073}
+\@writefile{lof}{\contentsline {figure}{\numberline {10}{\ignorespaces Multiple devices per thread: Events from the proxy thread as well as init and finalize calls are omitted. Collective API calls from multiple GPUs managed by a single thread only trigger a single \texttt  {GroupApi} event.}}{21}{figure.10}\protected@file@percent }
+\newlabel{fig:single-gpu-single-process-ncclgroup-finalize}{{10}{21}{Multiple devices per thread: Events from the proxy thread as well as init and finalize calls are omitted. Collective API calls from multiple GPUs managed by a single thread only trigger a single \texttt {GroupApi} event}{figure.10}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.1.2}Aggregated operations}{21}{subsubsection.4.1.2}\protected@file@percent }
+\BKM@entry{id=18,dest={73656374696F6E2E35},srcline={1391}}{5C3337365C3337375C303030505C303030655C303030725C303030665C3030306F5C303030725C3030306D5C303030615C3030306E5C303030635C303030655C3030305C3034305C303030615C3030306E5C303030645C3030305C3034305C303030735C303030635C303030615C3030306C5C303030615C303030625C303030695C3030306C5C303030695C303030745C303030795C3030305C3034305C3030306F5C303030665C3030305C3034305C303030745C303030685C303030655C3030305C3034305C303030505C303030725C3030306F5C303030665C303030695C3030306C5C303030655C303030725C3030305C3034305C303030505C3030306C5C303030755C303030675C303030695C3030306E5C3030305C3034305C303030415C303030505C30303049}
+\@writefile{lof}{\contentsline {figure}{\numberline {11}{\ignorespaces one GPU per thread with aggregated operations: multiple collective calls are grouped together and nccl does only a single kernel launch per thread.}}{22}{figure.11}\protected@file@percent }
+\newlabel{fig:one-gpu-per-thread-grouped-collectives}{{11}{22}{one GPU per thread with aggregated operations: multiple collective calls are grouped together and nccl does only a single kernel launch per thread}{figure.11}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Performance and scalability of the Profiler Plugin API}{22}{section.5}\protected@file@percent }
+\BKM@entry{id=19,dest={73656374696F6E2E36},srcline={1535}}{5C3337365C3337375C303030445C303030695C303030735C303030635C303030755C303030735C303030735C303030695C3030306F5C3030306E}
+\BKM@entry{id=20,dest={73756273656374696F6E2E362E31},srcline={1542}}{5C3337365C3337375C303030435C3030306F5C3030306E5C303030735C303030695C303030645C303030655C303030725C303030615C303030745C303030695C3030306F5C3030306E5C303030735C3030305C3034305C303030665C3030306F5C303030725C3030305C3034305C303030645C303030655C303030765C303030655C3030306C5C3030306F5C303030705C303030655C303030725C303030735C3030305C3034305C3030306F5C303030665C3030305C3034305C303030615C3030305C3034305C303030505C303030725C3030306F5C303030665C303030695C3030306C5C303030655C303030725C3030305C3034305C303030505C3030306C5C303030755C303030675C303030695C3030306E}
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Profiler overhead: nccl-tests \texttt  {sendrecv\_perf} (P2P) and \texttt  {all\_reduce\_perf} (collectives). Latency averaged over 1M iterations.}}{24}{table.1}\protected@file@percent }
+\newlabel{tab:profiler-overhead}{{1}{24}{Profiler overhead: nccl-tests \texttt {sendrecv\_perf} (P2P) and \texttt {all\_reduce\_perf} (collectives). Latency averaged over 1M iterations}{table.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Discussion}{24}{section.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Considerations for developers of a Profiler Plugin}{24}{subsection.6.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\nonumberline Profiler Visualization.}{24}{paragraph*.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\nonumberline Correlating Collective Events with \texttt  {seqNumber}.}{24}{paragraph*.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\nonumberline Tracing low level activity back to NCCL API calls with \texttt  {parentObj}.}{25}{paragraph*.3}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {12}{\ignorespaces An example illustrating how \texttt  {parentObj} and \texttt  {seqNumber} can be used to better understand the timing of concurrent collective operations.}}{25}{figure.12}\protected@file@percent }
+\newlabel{fig:phase-4-3rd-iter}{{12}{25}{An example illustrating how \texttt {parentObj} and \texttt {seqNumber} can be used to better understand the timing of concurrent collective operations}{figure.12}{}}
+\@writefile{toc}{\contentsline {paragraph}{\nonumberline Process origin for profiler callbacks with PXN enabled.}{25}{paragraph*.4}\protected@file@percent }
+\BKM@entry{id=21,dest={73756273656374696F6E2E362E32},srcline={1604}}{5C3337365C3337375C3030304B5C3030306E5C3030306F5C303030775C3030306E5C3030305C3034305C3030306C5C303030695C3030306D5C303030695C303030745C303030615C303030745C303030695C3030306F5C3030306E5C30303073}
+\BKM@entry{id=22,dest={73756273656374696F6E2E362E33},srcline={1617}}{5C3337365C3337375C303030505C3030306F5C303030745C303030655C3030306E5C303030745C303030695C303030615C3030306C5C3030305C3034305C303030495C3030306E5C303030745C303030655C303030675C303030725C303030615C303030745C303030695C3030306F5C3030306E5C3030305C3034305C303030775C303030695C303030745C303030685C3030305C3034305C303030535C303030635C3030306F5C303030725C303030655C3030302D5C30303050}
+\@writefile{toc}{\contentsline {paragraph}{\nonumberline Tracking communicator parent--child relationships.}{26}{paragraph*.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}Known limitations}{26}{subsection.6.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Potential Integration with Score-P}{26}{subsection.6.3}\protected@file@percent }
+\BKM@entry{id=23,dest={73656374696F6E2E37},srcline={1665}}{5C3337365C3337375C303030435C3030306F5C3030306E5C303030635C3030306C5C303030755C303030735C303030695C3030306F5C3030306E}
+\@writefile{lof}{\contentsline {figure}{\numberline {13}{\ignorespaces CUPTI activity is visualized as orange event bars. With a unique correlation Id, it is possible to trace the activity back to \texttt  {KernelLaunch} events}}{27}{figure.13}\protected@file@percent }
+\newlabel{fig:cupti-example}{{13}{27}{CUPTI activity is visualized as orange event bars. With a unique correlation Id, it is possible to trace the activity back to \texttt {KernelLaunch} events}{figure.13}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {7}Conclusion}{27}{section.7}\protected@file@percent }
+\global\@namedef{scr@dte@section@lastmaxnumwidth}{10.46805pt}
+\global\@namedef{scr@dte@subsection@lastmaxnumwidth}{18.0674pt}
+\global\@namedef{scr@dte@subsubsection@lastmaxnumwidth}{26.27988pt}
+\@writefile{toc}{\providecommand\tocbasic@end@toc@file{}\tocbasic@end@toc@file}
+\@writefile{toc}{\providecommand\tocbasic@end@toc@file{}\tocbasic@end@toc@file}
+\gdef \@abspage@last{30}

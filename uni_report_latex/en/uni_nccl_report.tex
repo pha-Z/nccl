@@ -1,14 +1,26 @@
-\documentclass[11pt]{article}
+% \documentclass[11pt]{article}
+\documentclass[english,hauptseminar,hyperref]{zihpub}
+
 
 \usepackage[margin=1in]{geometry}
 \usepackage[T1]{fontenc}
-\usepackage[utf8]{inputenc}
-\usepackage[english]{babel}
+% \usepackage[utf8]{inputenc}
+% \usepackage[english,ngerman]{babel}
+\usepackage{setspace}
+\usepackage{times}
 \usepackage{amsmath}
-\usepackage{listings}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{url}
+\usepackage{color}
+\usepackage{enumerate}
 \usepackage{xcolor}
 \usepackage{hyperref}
-\usepackage{graphicx}
+\usepackage{fancyvrb}
+\usepackage{listings}
 \usepackage{grffile}
 \usepackage{float}
 \usepackage{lineno}
@@ -43,8 +55,9 @@
 \setlength{\parskip}{0.75\baselineskip}
 
 \title{NCCL Profiler Plugin API -- A Feasibility Study}
-\author{}
-\date{}
+\author{Alexander Moritz Van Le}
+\matno{4607469}
+\betreuer{Bert Wesarg}
 
 \begin{document}
 \linenumbers
@@ -458,7 +471,7 @@ See Fig.~\ref{fig:profiler-init}. The NCCL documentation\footnote{\url{https://d
 
 \begin{quote}
 \begin{itemize}
-  \item If \texttt{NCCL\_PROFILER\_PLUGIN} is set: attempt to load the library with the specified name; if that fails, attempt \texttt{libnccl-profiler-<NCCL\_PROFILER\_PLUGIN>.so}.
+  \item If \texttt{NCCL\_PROFILER\_PLUGIN} is set: attempt to load the library with the specified name; \\if that fails, attempt \texttt{libnccl-profiler-<NCCL\_PROFILER\_PLUGIN>.so}.
   \item If \texttt{NCCL\_PROFILER\_PLUGIN} is not set: attempt \texttt{libnccl-profiler.so}.
   \item If no plugin was found: profiling is disabled.
   \item If \texttt{NCCL\_PROFILER\_PLUGIN} is set to \texttt{STATIC\_PLUGIN}, the plugin symbols are searched in the program binary.
@@ -522,7 +535,7 @@ We show three participants: \emph{User}, \emph{NCCL}, and \emph{Profiler plugin}
 
 \begin{figure}[H]
 \centering
-% \scalebox{0.95}{%
+\scalebox{0.95}{%
 \begin{sequencediagram}
 \newthread{user}{User}
 \newinst[1.7]{nccl}{NCCL init.cc}
@@ -537,7 +550,7 @@ We show three participants: \emph{User}, \emph{NCCL}, and \emph{Profiler plugin}
      
         \begin{callself}{nccl}{ncclProfilerPluginLoad}{}
 
-          \begin{sdblock}{\texttt{if (profilerPluginStatus != profilerPluginLoadSuccess)}}{}
+          \begin{sdblock}{\footnotesize\texttt{if (profilerPluginStatus != profilerPluginLoadSuccess)}}{}
             \begin{callself}{nccl}{\texttt{ncclGetEnv}}{}
             \end{callself}
             \begin{callself}{nccl}{ncclOpenProfilerPluginLib}{}
@@ -567,7 +580,7 @@ We show three participants: \emph{User}, \emph{NCCL}, and \emph{Profiler plugin}
   \end{callself}
 \end{call}
 \end{sequencediagram}%
-% }
+}
 \caption{User API $\to$ NCCL communicator init $\to$ load profiler plugin and call \texttt{profiler->init}.}
 \label{fig:profiler-init}
 \end{figure}
@@ -650,7 +663,7 @@ enum {
 The default value is to 0, which means no events are tracked by the profiler. 
 Setting it to 4095 will track all events.
 
-\texttt{ncclDebugLogger\_t logfn} is a function pointer to NCCL's internal debug logger (\texttt{ncclDebugLog}). 
+\texttt{ncclDebugLogger\_t logfn} is a function pointer to NCCL's internal debug logger \\(\texttt{ncclDebugLog}). 
 NCCL passes this so the plugin can emit log lines through the same channel and filtering as NCCL: 
 the plugin may store the callback and call it with \texttt{(level, flags, file, line, fmt, ...)} when it wants to log. 
 Messages then appear in NCCL's debug output (e.g.\ stderr or \texttt{NCCL\_DEBUG\_FILE}) and respect the user's \texttt{NCCL\_DEBUG} level and subsystem mask. 
