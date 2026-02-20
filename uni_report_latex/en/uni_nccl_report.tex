@@ -1636,7 +1636,7 @@ Score-P records these as labeled regions without requiring the plugin to link di
 This approach decouples the NCCL plugin from the Score-P build environment
 and instead relies on Score-P's internal NVTX-to-OTF2 mapping logic.
 
-The plugin can utilize \texttt{cuptiActivityPushExternalCorrelationId} to capture GPU activity 
+The plugin can utilize \texttt{cuptiActivityPush/PopExternalCorrelationId} to capture GPU activity 
 during the \texttt{startEvent} and \texttt{stopEvent} of \texttt{KernelLaunch} events, 
 while incrementing a thread-safe correlation ID (see Fig.~\ref{fig:cupti-example})
 CUPTI can be initialized and cleaned up within the profiler plugin's \texttt{init} and \texttt{finalize} functions.
