@@ -1608,43 +1608,43 @@ for profiling and event tracing of HPC applications.
 It supports a number of analysis tools. 
 Currently, it works with Scalasca, Vampir, and Tau and is open for other tools 
 and produces OTF2 traces and CUBE4 profiles.
+Integrating NCCL into this Score-P allows developers 
+to see communication collectives alongside the application logic. 
 
-For Score-P, it is important that communicator identities are unique.
-NCCL achieves this for \texttt{ncclGetUniqueId}\footnote{\url{https://github.com/NVIDIA/nccl/tree/master/src/init.cc}} without a central coordinator.
-Each call fills the bootstrap handle embedded in \texttt{ncclUniqueId} with 
-\begin{itemize}
-  \item a random 64-bit \texttt{magic} value from \texttt{/dev/urandom}, and 
-  \item the socket \texttt{address} of a new listening socket (IP, port), whose port is chosen by the operating system.
-\end{itemize}
-The pair (random magic, IP+port) is unique in practice: 
-different MPI tasks or repeated calls in one process each get distinct random magic and a distinct OS-assigned port so collisions are avoided.
+A prerequisite for distributed tracing is the unique identification of process groups. 
+NCCL achieves this via \texttt{ncclGetUniqueId}\footnote{\url{https://github.com/NVIDIA/nccl/tree/master/src/init.cc}} without a central coordinator. 
+It generates a handle containing 
+a random 64-bit \texttt{magic} value from \texttt{/dev/urandom} 
+and the socket \texttt{address} of a new listening socket (IP, port), 
+whose port is chosen by the operating system. 
+Different MPI tasks or repeated calls in one process each get distinct random magic
+and distinct OS-assigned ports are assigned across a cluster, thus collisions are avoided in practice.
+Because of this, a Score-P integration can use these to define Process Groups. 
 
-The NCCL profiler plugin is callback-driven \emph{by NCCL}.
-NCCL loads it via \texttt{dlopen} and invokes \texttt{startEvent}, \texttt{stopEvent}, and \texttt{recordEventState}
-during collective and P2P operations.
+The integration could be achieved in two ways, 
+either using a direct Profiler API mapping 
+or via an indirect NVTX/CUPTI annotation:
 
-In one potential integration strategy, a developer would implement the NCCL profiler API 
-and could use Score-P's user instrumentation API
-(e.g., \texttt{SCOREP\_USER\_REGION\_BY\_NAME\_BEGIN}/\texttt{END})
-to inject NCCL Profiler Events as regions into Score-P.
-The region name could be derived from the event descriptor (e.g., \texttt{collApi.func} for \texttt{ncclAllReduce}).
-In this design, NCCL drives the profiler and the profiler forwards events into Score-P. 
-NCCL collective operations then appear as regions in Score-P profiles and traces.
+A direct integration would potentially involve implementing a NCCL profiler plugin that translates the startEvent and stopEvent callbacks into Score-P regions:
+The plugin maps NCCL event descriptors (e.g., ncclAllReduce) to Score-P regions using the instrumentation macros
+(e.g., \\\texttt{SCOREP\_USER\_REGION\_BY\_NAME\_BEGIN}/\texttt{END}).
 
-Alternatively, NVTX and CUPTI could be leveraged with CUDA adapters from Score-P.
-Similarly, the NCCL profiler plugin would use the NVTX API\footnote{\url{https://nvidia.github.io/NVTX/doxygen/group___m_a_r_k_e_r_s___a_n_d___r_a_n_g_e_s.html}} to annotate regions.
-Additionally, kernel tracing of with CUPTI can be integrated directly into the NCCL profiler plugin.
-The CUPTI API provides functions to correlate application code regions with CUPTI activity
-via \texttt{cuptiActivityPushExternalCorrelationId} and \\ \texttt{cuptiActivityPopExternalCorrelationId}.
-This can be handily integrated with the profiler API, whenever \texttt{KernelLaunch} events are started and stopped, 
-while continuously incrementing the correlation id in a thread-safe manner.
-Fig.~\ref{fig:cupti-example} provides an example visualization of this method.
-CUPTI can be initialized and cleaned up within the profiler plugin's own \texttt{init} and \texttt{finalize} functions.
+Alternatively, the NCCL profiler plugin can act as a bridge to NVIDIA's Tools Extension (NVTX). 
+If Score-P has been built with CUDA support it can intercept NVTX ranges.
+The NCCL profiler plugin would emit \texttt{nvtxRangePush}\footnote{\url{https://nvidia.github.io/NVTX/doxygen/group___m_a_r_k_e_r_s___a_n_d___r_a_n_g_e_s.html}} and \texttt{nvtxRangePop} around NCCL operations. 
+Score-P records these as labeled regions without requiring the plugin to link directly against Score-P libraries.
+This approach decouples the NCCL plugin from the Score-P build environment
+and instead relies on Score-P's internal NVTX-to-OTF2 mapping logic.
+
+The plugin can utilize \texttt{cuptiActivityPushExternalCorrelationId} to capture GPU activity 
+during the \texttt{startEvent} and \texttt{stopEvent} of \texttt{KernelLaunch} events, 
+while incrementing a thread-safe correlation ID (see Fig.~\ref{fig:cupti-example})
+CUPTI can be initialized and cleaned up within the profiler plugin's \texttt{init} and \texttt{finalize} functions.
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=\textwidth]{"images/ncclgroup stress test/cupti example.png"}
-  \caption{CUPTI activity is visualized as orange event bars. Through a correlation Id, it is possible to trace the activity back to \texttt{KernelLaunch} events}
+  \caption{CUPTI activity is visualized as orange event bars. With a unique correlation Id, it is possible to trace the activity back to \texttt{KernelLaunch} events}
   \label{fig:cupti-example}
 \end{figure}
 
@@ -1652,12 +1652,12 @@ CUPTI can be initialized and cleaned up within the profiler plugin's own \texttt
 \section{Conclusion}
 % ---------------------------------------------------------------------------
 
-This feasibility study examined the NCCL Profiler Plugin API 
+This study examined the NCCL Profiler Plugin API 
 and its suitability for integration with Score-P.
-The report provided background on NCCL and its design, 
-explained how the profiler plugin is detected and loaded,
+It provided background on NCCL and its design, 
+explained how the profiler plugin is loaded 
 and described the API definition with its five core callbacks 
-\texttt{init}, \texttt{startEvent}, \texttt{stopEvent}, \texttt{recordEventState}, \texttt{finalize}.
+\texttt{init}, \texttt{startEvent}, \texttt{stopEvent}, \\\texttt{recordEventState} and \texttt{finalize}.
 Code examples and visualizations illustrate the event flow from API calls to NCCL's internal profiler callbacks.
 Performance experiments showed that an empty profiler adds roughly 8--9\,$\mu$s overhead per operation in single-node runs 
 but introduces negligible overhead in multi-node runs, and scaling to many GPUs across nodes required no changes to the profiler plugin. 
