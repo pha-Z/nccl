@@ -1,14 +1,14 @@
 # Fdb version 4
-["bibtex uni_nccl_report"] 1772025674.40183 "uni_nccl_report.aux" "uni_nccl_report.bbl" "uni_nccl_report" 1772025688.73466 0
+["bibtex uni_nccl_report"] 1772031719.56329 "uni_nccl_report.aux" "uni_nccl_report.bbl" "uni_nccl_report" 1772031734.49076 0
   "./nccl-refs.bib" 1772025532 1016 fa7a9d13db7543c4334290d3e85eebd4 ""
   "c:/a/texlive/2025/texmf-dist/bibtex/bst/base/plain.bst" 1769773179 20613 bd3fbfa9f64872b81ac57a0dd2ed855f ""
-  "uni_nccl_report.aux" 1772025686 18841 c8c57076294066a200d8e6c68017b839 "pdflatex"
+  "uni_nccl_report.aux" 1772031731 18679 789c1d117136f8d9d2f2fe77220175ca "pdflatex"
   (generated)
   "uni_nccl_report.bbl"
   "uni_nccl_report.blg"
   (rewritten before read)
-["pdflatex"] 1772025675.38696 "c:/Users/morit/Desktop/uni/hauptseminar nccl/nccl/uni_report_latex/en/uni_nccl_report.tex" "uni_nccl_report.pdf" "uni_nccl_report" 1772025688.73606 0
-  "c:/Users/morit/Desktop/uni/hauptseminar nccl/nccl/uni_report_latex/en/uni_nccl_report.tex" 1772025643 80146 be25d3ad807316eb50481c5c6475ce14 ""
+["pdflatex"] 1772031720.55889 "c:/Users/morit/Desktop/uni/hauptseminar nccl/nccl/uni_report_latex/en/uni_nccl_report.tex" "uni_nccl_report.pdf" "uni_nccl_report" 1772031734.49263 0
+  "c:/Users/morit/Desktop/uni/hauptseminar nccl/nccl/uni_report_latex/en/uni_nccl_report.tex" 1772031727 80087 0a9bebe687608c6d1067c581a7c7b7a9 ""
   "c:/a/texlive/2025/texmf-dist/fonts/enc/dvips/base/8r.enc" 1769774499 4850 80dc9bab7f31fb78a000ccfed0e27cab ""
   "c:/a/texlive/2025/texmf-dist/fonts/map/fontname/texfonts.map" 1769775222 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/courier/pcrb8r.tfm" 1769774009 1292 3059476c50a24578715759f22652f3d0 ""
@@ -245,16 +245,16 @@
   "c:/a/texlive/2025/texmf-var/fonts/map/pdftex/updmap/pdftex.map" 1769781970 5587488 bb1fc5f9da419175a2f8a5bd2838032d ""
   "c:/a/texlive/2025/texmf-var/web2c/pdftex/pdflatex.fmt" 1769782223 3636304 5c55348a1c70a3db784ee905232c700d ""
   "c:/a/texlive/2025/texmf.cnf" 1769781934 835 15d98ed9a7362f0ac2a0fb81928d01a3 ""
-  "images/multi_gpu_single_thread/finalize alt (2).png" 1771414804 323580 b7d5c0fb0f0acfcfabc8696cab9ac383 ""
-  "images/multi_gpu_single_thread/show proxystep alt (2).png" 1771414060 680677 7914afaab152e40bf841ebdc5d72f33c ""
-  "images/ncclgroup 03_communicators_01_allreduce/init (2).png" 1771410157 314356 0ad30ba3519523020f775037bbc09be3 ""
-  "images/ncclgroup stress test/cupti example.png" 1771588750 320475 8354e712a044fc3b9b10b34545b67c7a ""
-  "images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (3).png" 1771415837 294671 5351a2f338d834cbddc0b8f4b75e1bb5 ""
-  "images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter.png" 1770973205 316247 a359502b99a6b261b26409362cb6d6ca ""
-  "uni_nccl_report.aux" 1772025686 18841 c8c57076294066a200d8e6c68017b839 "pdflatex"
-  "uni_nccl_report.bbl" 1772025675 792 60a1d086c8b4126d5c052d66a69b6255 "bibtex uni_nccl_report"
-  "uni_nccl_report.tex" 1772025643 80146 be25d3ad807316eb50481c5c6475ce14 ""
-  "uni_nccl_report.toc" 1772025686 2667 3bf348b02853d9a4671af1345313dceb "pdflatex"
+  "images/multi_gpu_single_thread/finalize alt (3).png" 1772028412 335282 c8b4f9993f2352b0e07f30c753cb1159 ""
+  "images/multi_gpu_single_thread/show proxystep alt (3).png" 1772029150 975424 56be70935b1384bb62a554701740738c ""
+  "images/ncclgroup 03_communicators_01_allreduce/init (3).png" 1772029472 199290 d90c4c03325faab488afb90f83ff177e ""
+  "images/ncclgroup stress test/cupti example (2).png" 1772031588 152959 567350babadbb305bca839d81d6b7515 ""
+  "images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (4).png" 1772030344 209213 6bd627bc516cfcb855ac7e12447a8d14 ""
+  "images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter (2).png" 1772030959 177006 4af6b53a052e6093cb291cffa27303c8 ""
+  "uni_nccl_report.aux" 1772031731 18679 789c1d117136f8d9d2f2fe77220175ca "pdflatex"
+  "uni_nccl_report.bbl" 1772031720 792 60a1d086c8b4126d5c052d66a69b6255 "bibtex uni_nccl_report"
+  "uni_nccl_report.tex" 1772031727 80087 0a9bebe687608c6d1067c581a7c7b7a9 ""
+  "uni_nccl_report.toc" 1772031731 2667 3bf348b02853d9a4671af1345313dceb "pdflatex"
   "zihpub.cls" 1768756736 29131 3108874e06535752854ec17b60274762 ""
   (generated)
   "uni_nccl_report.aux"

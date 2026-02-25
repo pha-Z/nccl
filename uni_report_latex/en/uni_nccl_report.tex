@@ -1018,7 +1018,7 @@ We use one participant (ProxyProgress thread) and a loop block. Inside the loop 
 \end{sdblock}
 \end{sequencediagram}%
 }
-\caption{progressOps emits ProxyStep/KernelCh/NetPlugin events. getPostedOps emits ProxyOp events. Several events ProxyCtrl are also emitted}
+\caption{progressOps emits ProxyStep/KernelCh/NetPlugin events. getPostedOps emits ProxyOp events. Several events ProxyCtrl are also emitted.}
 \label{fig:proxy-event-emission}
 \end{figure}
 
@@ -1245,20 +1245,20 @@ If this type of communication is not required, then \texttt{ProxyStep} events wi
 
 \begin{figure}[H]
   \centering
-\includegraphics[width=\textwidth]{"images/multi_gpu_single_thread/finalize alt (2).png"}
+\includegraphics[width=\textwidth]{"images/multi_gpu_single_thread/finalize alt (3).png"}
     \caption{One device per thread: A visualization of the calls generated to the Profiler API, starting from communicator creation, 
     followed by a collective operation and communicator destruction. 
-    \texttt{ProxyStep} events have been omitted for visual clarity, see Fig.~\ref{fig:multi-gpu-single-thread-show-proxystep} for a depiction.}
+    ProxyStep events have been omitted for visual clarity, see Fig.~\ref{fig:multi-gpu-single-thread-show-proxystep} for a depiction.}
   \label{fig:multi-gpu-single-thread-allreduce}
 \end{figure}
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{"images/multi_gpu_single_thread/show proxystep alt (2).png"}
-  \caption{One device per thread: In Fig.~\ref{fig:multi-gpu-single-thread-allreduce} \texttt{ProxyStep} events have been omitted for visual clarity. 
+  \includegraphics[width=\textwidth]{"images/multi_gpu_single_thread/show proxystep alt (3).png"}
+  \caption{One device per thread: In Fig.~\ref{fig:multi-gpu-single-thread-allreduce} ProxyStep events have been omitted for visual clarity. 
   However, in multinode settings, many additional profiler API calls for proxyStep events happen, 
-  informing about the low level network steps in their event details via \texttt{recordEventState} (indicated as red circles above each of the event bars).
-  The blue dotted lines indicate the \texttt{parentObj} of each proxyStep event, 
+  informing about the low level network steps in their event details via recordEventState (indicated as red circles above each of the event bars).
+  The blue dotted lines indicate the parentObj of each proxyStep event, 
   which are the above proxyOp events.}
   \label{fig:multi-gpu-single-thread-show-proxystep}
 \end{figure}
@@ -1310,7 +1310,7 @@ It also holds when grouping (single) collectives for different communicators.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{"images/ncclgroup 03_communicators_01_allreduce/init (2).png"}
+  \includegraphics[width=\textwidth]{"images/ncclgroup 03_communicators_01_allreduce/init (3).png"}
     \caption{Multiple devices per thread: Events from the proxy thread as well as init and finalize calls are omitted. 
     Collective API calls from multiple GPUs managed by a single thread only trigger a single \texttt{GroupApi} event.}
   \label{fig:single-gpu-single-process-ncclgroup-finalize}
@@ -1349,7 +1349,7 @@ The behavior changes can be described as follow:
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{"images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (3).png"}
+  \includegraphics[width=\textwidth]{"images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (4).png"}
   \caption{one GPU per thread with aggregated operations: multiple collective calls are grouped together and nccl does only a single kernel launch per thread.}
   \label{fig:one-gpu-per-thread-grouped-collectives}
 \end{figure}
@@ -1599,8 +1599,8 @@ This field is useful when trying to understand which user API call triggered whi
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{"images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter.png"}
-  \caption{An example illustrating how \texttt{parentObj} and \texttt{seqNumber} can be used to better understand the timing of concurrent collective operations.}
+  \includegraphics[width=\textwidth]{"images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter (2).png"}
+  \caption{An example illustrating how parentObj and seqNumber can aid in understanding the timing of concurrent collective operations.}
   \label{fig:phase-4-3rd-iter}
 \end{figure}
 
@@ -1677,8 +1677,9 @@ CUPTI can be initialized and cleaned up within the profiler plugin's \texttt{ini
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{"images/ncclgroup stress test/cupti example.png"}
-  \caption{CUPTI activity is visualized as orange event bars. With a unique correlation Id, it is possible to trace the activity back to \texttt{KernelLaunch} events}
+  \includegraphics[width=\textwidth]{"images/ncclgroup stress test/cupti example (2).png"}
+  \caption{CUPTI activity is visualized as orange event bars. 
+  With a unique correlation Id, it is possible to trace the activity back to KernelLaunch events}
   \label{fig:cupti-example}
 \end{figure}
 

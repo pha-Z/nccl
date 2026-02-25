@@ -450,41 +450,41 @@ INPUT c:/a/texlive/2025/texmf-dist/tex/latex/listings/lstmisc.sty
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/courier/pcrr8t.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/courier/pcrr8t.vf
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/courier/pcrr8r.tfm
-INPUT ./images/multi_gpu_single_thread/finalize alt (2).png
-INPUT ./images/multi_gpu_single_thread/finalize alt (2).png
-INPUT ./images/multi_gpu_single_thread/finalize alt (2).png
-INPUT ./images/multi_gpu_single_thread/finalize alt (2).png
-INPUT ./images/multi_gpu_single_thread/finalize alt (2).png
-INPUT ./images/multi_gpu_single_thread/show proxystep alt (2).png
-INPUT ./images/multi_gpu_single_thread/show proxystep alt (2).png
-INPUT ./images/multi_gpu_single_thread/show proxystep alt (2).png
-INPUT ./images/multi_gpu_single_thread/show proxystep alt (2).png
-INPUT ./images/multi_gpu_single_thread/show proxystep alt (2).png
-INPUT ./images/ncclgroup 03_communicators_01_allreduce/init (2).png
-INPUT ./images/ncclgroup 03_communicators_01_allreduce/init (2).png
-INPUT ./images/ncclgroup 03_communicators_01_allreduce/init (2).png
-INPUT ./images/ncclgroup 03_communicators_01_allreduce/init (2).png
-INPUT ./images/ncclgroup 03_communicators_01_allreduce/init (2).png
-INPUT ./images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (3).png
-INPUT ./images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (3).png
-INPUT ./images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (3).png
-INPUT ./images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (3).png
-INPUT ./images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (3).png
+INPUT ./images/multi_gpu_single_thread/finalize alt (3).png
+INPUT ./images/multi_gpu_single_thread/finalize alt (3).png
+INPUT ./images/multi_gpu_single_thread/finalize alt (3).png
+INPUT ./images/multi_gpu_single_thread/finalize alt (3).png
+INPUT ./images/multi_gpu_single_thread/finalize alt (3).png
+INPUT ./images/multi_gpu_single_thread/show proxystep alt (3).png
+INPUT ./images/multi_gpu_single_thread/show proxystep alt (3).png
+INPUT ./images/multi_gpu_single_thread/show proxystep alt (3).png
+INPUT ./images/multi_gpu_single_thread/show proxystep alt (3).png
+INPUT ./images/multi_gpu_single_thread/show proxystep alt (3).png
+INPUT ./images/ncclgroup 03_communicators_01_allreduce/init (3).png
+INPUT ./images/ncclgroup 03_communicators_01_allreduce/init (3).png
+INPUT ./images/ncclgroup 03_communicators_01_allreduce/init (3).png
+INPUT ./images/ncclgroup 03_communicators_01_allreduce/init (3).png
+INPUT ./images/ncclgroup 03_communicators_01_allreduce/init (3).png
+INPUT ./images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (4).png
+INPUT ./images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (4).png
+INPUT ./images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (4).png
+INPUT ./images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (4).png
+INPUT ./images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (4).png
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/times/ptmr8c.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/times/ptmr8c.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/courier/pcrb8t.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/courier/pcrb8t.vf
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/courier/pcrb8r.tfm
-INPUT ./images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter.png
-INPUT ./images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter.png
-INPUT ./images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter.png
-INPUT ./images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter.png
-INPUT ./images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter.png
-INPUT ./images/ncclgroup stress test/cupti example.png
-INPUT ./images/ncclgroup stress test/cupti example.png
-INPUT ./images/ncclgroup stress test/cupti example.png
-INPUT ./images/ncclgroup stress test/cupti example.png
-INPUT ./images/ncclgroup stress test/cupti example.png
+INPUT ./images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter (2).png
+INPUT ./images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter (2).png
+INPUT ./images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter (2).png
+INPUT ./images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter (2).png
+INPUT ./images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter (2).png
+INPUT ./images/ncclgroup stress test/cupti example (2).png
+INPUT ./images/ncclgroup stress test/cupti example (2).png
+INPUT ./images/ncclgroup stress test/cupti example (2).png
+INPUT ./images/ncclgroup stress test/cupti example (2).png
+INPUT ./images/ncclgroup stress test/cupti example (2).png
 INPUT ./uni_nccl_report.bbl
 INPUT ./uni_nccl_report.bbl
 INPUT uni_nccl_report.bbl

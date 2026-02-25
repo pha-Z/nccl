@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.28 (TeX Live 2025) (preloaded format=pdflatex 2026.1.30)  25 FEB 2026 14:21
+This is pdfTeX, Version 3.141592653-2.6-1.40.28 (TeX Live 2025) (preloaded format=pdflatex 2026.1.30)  25 FEB 2026 16:02
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -1144,81 +1144,81 @@ Overfull \hbox (8.78015pt too wide) in paragraph at lines 1224--1242
  []
 
 [16]
-<images/multi_gpu_single_thread/finalize alt (2).png, id=396, 531.78674pt x 545.03625pt>
-File: images/multi_gpu_single_thread/finalize alt (2).png Graphic file (type png)
-<use images/multi_gpu_single_thread/finalize alt (2).png>
-Package pdftex.def Info: images/multi_gpu_single_thread/finalize alt (2).png  used on input line 1248.
-(pdftex.def)             Requested size: 452.96796pt x 464.25604pt.
-<images/multi_gpu_single_thread/show proxystep alt (2).png, id=400, 605.8635pt x 497.4585pt>
-File: images/multi_gpu_single_thread/show proxystep alt (2).png Graphic file (type png)
-<use images/multi_gpu_single_thread/show proxystep alt (2).png>
-Package pdftex.def Info: images/multi_gpu_single_thread/show proxystep alt (2).png  used on input line 1257.
-(pdftex.def)             Requested size: 452.96796pt x 371.924pt.
+<images/multi_gpu_single_thread/finalize alt (3).png, id=396, 775.09575pt x 826.88925pt>
+File: images/multi_gpu_single_thread/finalize alt (3).png Graphic file (type png)
+<use images/multi_gpu_single_thread/finalize alt (3).png>
+Package pdftex.def Info: images/multi_gpu_single_thread/finalize alt (3).png  used on input line 1248.
+(pdftex.def)             Requested size: 452.96796pt x 483.22989pt.
+<images/multi_gpu_single_thread/show proxystep alt (3).png, id=400, 905.784pt x 628.14674pt>
+File: images/multi_gpu_single_thread/show proxystep alt (3).png Graphic file (type png)
+<use images/multi_gpu_single_thread/show proxystep alt (3).png>
+Package pdftex.def Info: images/multi_gpu_single_thread/show proxystep alt (3).png  used on input line 1257.
+(pdftex.def)             Requested size: 452.96796pt x 314.12053pt.
  [17
 pdfTeX warning (ext4): destination with the same identifier (name{figure.8}) has been already used, duplicate ignored
 <argument> ...shipout:D \box_use:N \l_shipout_box 
                                                   \__shipout_drop_firstpage_...
 l.1265 
-        <./images/multi_gpu_single_thread/finalize alt (2).png>] [18
+        <./images/multi_gpu_single_thread/finalize alt (3).png>] [18
 pdfTeX warning (ext4): destination with the same identifier (name{figure.9}) has been already used, duplicate ignored
 <argument> ...shipout:D \box_use:N \l_shipout_box 
                                                   \__shipout_drop_firstpage_...
-l.1280 for 
-           (int i=0; i<ngpus; i++) { <./images/multi_gpu_single_thread/show proxystep alt (2).png>]
-<images/ncclgroup 03_communicators_01_allreduce/init (2).png, id=423, 1038.279pt x 502.87875pt>
-File: images/ncclgroup 03_communicators_01_allreduce/init (2).png Graphic file (type png)
-<use images/ncclgroup 03_communicators_01_allreduce/init (2).png>
-Package pdftex.def Info: images/ncclgroup 03_communicators_01_allreduce/init (2).png  used on input line 1313.
-(pdftex.def)             Requested size: 452.96796pt x 219.39503pt.
- [19] [20
+l.1284 ncclGroupEnd(
+                    ); <./images/multi_gpu_single_thread/show proxystep alt (3).png>]
+<images/ncclgroup 03_communicators_01_allreduce/init (3).png, id=427, 1010.5755pt x 516.7305pt>
+File: images/ncclgroup 03_communicators_01_allreduce/init (3).png Graphic file (type png)
+<use images/ncclgroup 03_communicators_01_allreduce/init (3).png>
+Package pdftex.def Info: images/ncclgroup 03_communicators_01_allreduce/init (3).png  used on input line 1313.
+(pdftex.def)             Requested size: 452.96796pt x 231.61195pt.
+ [19
 pdfTeX warning (ext4): destination with the same identifier (name{figure.10}) has been already used, duplicate ignored
 <argument> ...shipout:D \box_use:N \l_shipout_box 
                                                   \__shipout_drop_firstpage_...
-l.1346   \item s
-                ingle KernelLaunch event per thread <./images/ncclgroup 03_communicators_01_allreduce/init (2).png>]
-<images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (3).png, id=475, 804.00375pt x 484.81125pt>
-File: images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (3).png Graphic file (type png)
-<use images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (3).png>
-Package pdftex.def Info: images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (3).png  used on input line 1352.
-(pdftex.def)             Requested size: 452.96796pt x 273.1347pt.
- [21
+l.1319 \subsection{Aggregated operations}
+                                          <./images/ncclgroup 03_communicators_01_allreduce/init (3).png>]
+<images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (4).png, id=453, 835.923pt x 488.42474pt>
+File: images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (4).png Graphic file (type png)
+<use images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (4).png>
+Package pdftex.def Info: images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (4).png  used on input line 1352.
+(pdftex.def)             Requested size: 452.96796pt x 264.66957pt.
+ [20] [21
 pdfTeX warning (ext4): destination with the same identifier (name{figure.11}) has been already used, duplicate ignored
 <argument> ...shipout:D \box_use:N \l_shipout_box 
                                                   \__shipout_drop_firstpage_...
-l.1421   *c
-           ontext = malloc(sizeof(struct MyContext)); <./images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (3).png>] [22]
+l.1426 ncclResult_t 
+                    myStartEvent(void* context, void** eHandle, ncclProfiler... <./images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (4).png>]
 Overfull \hbox (2.64871pt too wide) in paragraph at lines 1489--1490
  [][] 
  []
 
-[23
+[22] [23
 pdfTeX warning (ext4): destination with the same identifier (name{table.1}) has been already used, duplicate ignored
 <argument> ...shipout:D \box_use:N \l_shipout_box 
                                                   \__shipout_drop_firstpage_...
-l.1586   __atomic_fetch_add(
-                            &plan->comm->seqNumber[ct->func], 1, __ATOMIC_RE...]
-<images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter.png, id=546, 953.36176pt x 407.121pt>
-File: images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter.png Graphic file (type png)
-<use images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter.png>
-Package pdftex.def Info: images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter.png  used on input line 1602.
-(pdftex.def)             Requested size: 452.96796pt x 193.43417pt.
+l.1589 \end{lstlisting}
+                       ]
+<images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter (2).png, id=551, 1035.26775pt x 506.49225pt>
+File: images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter (2).png Graphic file (type png)
+<use images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter (2).png>
+Package pdftex.def Info: images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter (2).png  used on input line 1602.
+(pdftex.def)             Requested size: 452.96796pt x 221.60527pt.
  [24
 pdfTeX warning (ext4): destination with the same identifier (name{figure.12}) has been already used, duplicate ignored
 <argument> ...shipout:D \box_use:N \l_shipout_box 
                                                   \__shipout_drop_firstpage_...
-l.1616 
-        <./images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter.png>] [25]
-<images/ncclgroup stress test/cupti example.png, id=577, 1061.1645pt x 484.81125pt>
-File: images/ncclgroup stress test/cupti example.png Graphic file (type png)
-<use images/ncclgroup stress test/cupti example.png>
-Package pdftex.def Info: images/ncclgroup stress test/cupti example.png  used on input line 1680.
-(pdftex.def)             Requested size: 452.96796pt x 206.94086pt.
+l.1625 
+        <./images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter (2).png>] [25]
+<images/ncclgroup stress test/cupti example (2).png, id=577, 1034.06325pt x 540.21825pt>
+File: images/ncclgroup stress test/cupti example (2).png Graphic file (type png)
+<use images/ncclgroup stress test/cupti example (2).png>
+Package pdftex.def Info: images/ncclgroup stress test/cupti example (2).png  used on input line 1680.
+(pdftex.def)             Requested size: 452.96796pt x 236.64165pt.
  [26
 pdfTeX warning (ext4): destination with the same identifier (name{figure.13}) has been already used, duplicate ignored
 <argument> ...shipout:D \box_use:N \l_shipout_box 
                                                   \__shipout_drop_firstpage_...
-l.1699 
-        <./images/ncclgroup stress test/cupti example.png>] [27] (./uni_nccl_report.bbl
+l.1700 
+        <./images/ncclgroup stress test/cupti example (2).png>] [27] (./uni_nccl_report.bbl
 Underfull \hbox (badness 2057) in paragraph at lines 14--17
 []\T1/ptm/m/n/10.95 NVIDIA.  Nccl user guide.  []$\T1/pcr/m/n/10.95 https : / / docs . nvidia . com / deeplearning / nccl /
  []
@@ -1233,14 +1233,14 @@ L3 programming layer <2026-01-19>
  ) 
 Here is how much of TeX's memory you used:
  35817 strings out of 467533
- 734652 string characters out of 5422626
- 1562727 words of memory out of 5000000
+ 734716 string characters out of 5422626
+ 1562698 words of memory out of 5000000
  63829 multiletter control sequences out of 15000+600000
  686406 words of font info for 111 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 122i,14n,121p,11298b,2658s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 122i,14n,121p,11298b,2662s stack positions out of 10000i,1000n,20000p,200000b,200000s
 <c:/a/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/urw/courier/ucrb8a.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/urw/courier/ucrr8a.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/urw/helvetic/uhvb8a.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/urw/helvetic/uhvr8a.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/urw/times/utmb8a.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/urw/times/utmr8a.pfb><c:/a/texlive/2025/texmf-dist/fonts/type1/urw/times/utmri8a.pfb>
-Output written on uni_nccl_report.pdf (29 pages, 1959349 bytes).
+Output written on uni_nccl_report.pdf (29 pages, 1765448 bytes).
 PDF statistics:
  798 PDF objects out of 1000 (max. 8388607)
  710 compressed objects within 8 object streams
