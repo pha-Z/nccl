@@ -1,5 +1,5 @@
 % \documentclass[11pt]{article}
-\documentclass[english,hauptseminar,hyperref]{zihpub}
+\documentclass[english,hauptseminar,hyperref,bibnum]{zihpub}
 
 
 \usepackage[margin=1in]{geometry}
@@ -24,6 +24,13 @@
 \usepackage{grffile}
 \usepackage{float}
 \usepackage{lineno}
+\usepackage{siunitx}
+\usepackage{xspace}
+\sisetup{group-separator = {\,}, group-minimum-digits = 4}
+
+% Short ``page ref'' style footnotes for NCCL repo code (base URL cited once in References)
+\newcommand{\ncclrepobase}{https://github.com/NVIDIA/nccl/blob/v2.28.7-1}
+\newcommand{\ncclref}[1]{\footnote{\href{\ncclrepobase/#1}{\texttt{\detokenize{#1}}}.}}
 
 % Sequence diagrams
 \usepackage{tikz}
@@ -54,16 +61,15 @@
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{0.75\baselineskip}
 
-\title{NCCL Profiler Plugin API -- A Feasibility Study}
 \author{Alexander Moritz Van Le}
+\title{NCCL Profiler Plugin API -- A Feasibility Study}
 \matno{4607469}
 \betreuer{Bert Wesarg}
+\bibfiles{nccl-refs}
 
 \begin{document}
-\linenumbers
 
-\maketitle
-\tableofcontents
+\linenumbers
 
 % ---------------------------------------------------------------------------
 \section{Abstract}
@@ -79,16 +85,16 @@ This feasibility study explores the capabilities and integration mechanisms of t
 
 First, this study provides background information on NCCL, 
 followed by an explanation of the Profiler API accompanied with code examples and visualizations.
-Next, considerations for developers of the Profiler API and its potential integration with Score-P is discussed. 
+Next, considerations for developers of the Profiler API and its potential integration with \mbox{Score-P\xspace} is discussed. 
 Finally, the study concludes with a summary of the findings.
 
 % ---------------------------------------------------------------------------
 \section{Introduction to NCCL}
 % ---------------------------------------------------------------------------
 NCCL was first introduced by NVIDIA in 2015 at the Supercomputing Conference\footnote{\url{https://images.nvidia.com/events/sc15/pdfs/NCCL-Woolley.pdf}}
-with code being made available on GitHub\footnote{\url{https://github.com/NVIDIA/nccl}}.
-The release of NCCL 2.0 in 2017 brought support for NVLink, however this was initially only available as pre-built binaries.
-With the release of NCCL 2.3 in 2018, it returned to being fully open source.
+with the code published on GitHub\cite{nccl-repo}.
+The release of NCCL 2.0 in 2017 brought support for NVLink, however it was initially only available as pre-built binaries.
+With the release of 2.3 in 2018, NCCL returned to being fully open source on GitHub.
 The NCCL Profiler Plugin API was even later introduced with NCCL 2.23 in early 2025.
 
 Before taking a closer look at the Profiler Plugin API, it is helpful to have some rudimentary understanding on certain designs in NCCL.
@@ -97,7 +103,12 @@ Before taking a closer look at the Profiler Plugin API, it is helpful to have so
 Although NCCL is inspired by the Message Passing Interface (MPI) in terms of API design and usage patterns, there are notable differences due to their respective focuses:
 \begin{itemize}
 \item \textbf{MPI}: Communication is CPU-based. A rank corresponds to a single CPU process within a communicator.
-\item \textbf{NCCL}: Communication is GPU-based, with CPU threads handling orchestration. A rank corresponds to a GPU device within a communicator; the mapping from ranks to devices is surjective. A single CPU thread can manage multiple ranks (i.e., multiple devices) in a communicator using the functions \texttt{ncclGroupStart} and \texttt{ncclGroupEnd}. A CPU thread can also manage multiple ranks from different communicators (i.e same device alloted by multiple ranks from different communicators) through communicator creation with \texttt{ncclCommSplit} or \texttt{ncclCommShrink}. This means the mapping from ranks to threads is also surjective.
+\item \textbf{NCCL}: Communication is GPU-based, with CPU threads handling orchestration. 
+A rank corresponds to a GPU device within a communicator, 
+where the mapping from ranks to devices is surjective. 
+A single CPU thread can manage multiple ranks (i.e. multiple devices) in a communicator using the functions \texttt{ncclGroupStart} and \texttt{ncclGroupEnd}. 
+A CPU thread can also manage multiple ranks from \emph{different} communicators (i.e. same device alloted by ranks from different communicators through communicator creation with \texttt{ncclCommSplit} or \texttt{ncclCommShrink}),
+so the mapping from ranks to threads is also surjective.
 \end{itemize}
 
 \subsection{Relevant NCCL internals}
@@ -113,7 +124,7 @@ A typical NCCL application follows this basic structure:
 \end{itemize}
 
 During NCCL communicator creation, NCCL internally spawns a thread called \texttt{ProxyService}. 
-This thread lazily starts another thread called \texttt{ProxyProgress}\footnote{\url{https://github.com/NVIDIA/nccl/tree/master/src/proxy.cc}}, 
+This thread lazily starts another thread called \texttt{ProxyProgress}\ncclref{src/proxy.cc}, 
 which handles network requests for GPU communication during collective and P2P operations.
 See Fig.~\ref{fig:thread-creation}.
 \iffalse
@@ -207,11 +218,11 @@ We model four participants: the \emph{User} (application), \emph{NCCL} (internal
   \end{callself}
 \end{call}
 \end{sequencediagram}
-\caption{Thread creation: User API $\to$ NCCL internal init $\to$ create ProxyService $\to$ create ProxyProgress.}
+\caption{Thread creation: User API $\to$ NCCL internal init $\to$ create ProxyService $\to$ create Proxy\-Progress.}
 \label{fig:thread-creation}
 \end{figure}
 
-\texttt{if}-guards ensure that these threads are created once per \texttt{ncclSharedResources}\footnote{\url{https://github.com/NVIDIA/nccl/tree/master/src/include/comm.h}}.
+\texttt{if}-guards ensure that these threads are created once per \texttt{ncclSharedResources}\ncclref{src/include/comm.h}.
 \iffalse
 \textbf{/src/include/comm.h}
 \begin{lstlisting}[language=C]
@@ -263,8 +274,8 @@ the newly created communicator uses the same shared resource (and the proxy thre
 \fi
 
 Later, whenever the application calls the NCCL User API, 
-NCCL internally decides what network operations to perform and calls \texttt{ncclProxyPost} to post them to a proxyOpsPool
-(See Fig.~\ref{fig:proxy-post}).
+NCCL internally decides what network operations to perform and calls \texttt{ncclProxyPost} to post them to a \texttt{proxyOpsPool}.
+See Fig.~\ref{fig:proxy-post}.
 
 \iffalse
 \begin{lstlisting}[style=ascii]
@@ -382,11 +393,11 @@ We show the \emph{User} invoking \emph{NCCL} with either a collective/P2P call o
 % \end{callself}
 
 \end{sequencediagram}%
-\caption{Flow from User API to \texttt{ncclProxyPost}}
+\caption{Flow from User API to ncclProxyPost}
 \label{fig:proxy-post}
 \end{figure}
 
-The ProxyProgress thread reads from this pool when calling \texttt{ncclProxyGetPostedOps} and progresses the ops.
+The \texttt{ProxyProgress} thread reads from this pool when calling \texttt{ncclProxyGetPostedOps} and progresses the ops.
 See Fig.~\ref{fig:proxy-progress-loop}.
 
 \iffalse
@@ -434,7 +445,7 @@ We use a single participant (the ProxyProgress thread) and a loop block. Inside 
 
 \end{sdblock}
 \end{sequencediagram}%
-\caption{/src/proxy.cc \texttt{ncclProxyProgress} progressing loop: progress ops, then get posted ops (or wait). }
+\caption{The ProxyThread runs in a simple progressing loop: progress ops, then get posted ops (or wait). }
 \label{fig:proxy-progress-loop}
 \end{figure}
 
@@ -448,16 +459,16 @@ the Profiler Plugin API's behavior discussed in the following section.
 Whenever a communicator is created, NCCL looks for the existence of a profiler plugin
 and loads it if it has not already been loaded on the process.
 NCCL then initializes the plugin with the created communicator.
-Whenever the application makes calls to the Collectives or P2p API (e.g. \texttt{ncclAllReduce}) with that communicator,
+Whenever the user application calls the Collectives or P2P API (e.g. \texttt{ncclAllReduce}) with this communicator,
 NCCL calls the profiler API in different regions of the internal code.
 When the communicator is destroyed, the profiler plugin is unloaded if this was the only communicator on the process.
 
 
 \subsection{Profiler plugin loading mechanism}
 
-Each time a NCCL communicator is created, \texttt{ncclProfilerPluginLoad}\footnote{\url{https://github.com/NVIDIA/nccl/tree/master/src/plugin/profiler.cc}} is called, 
+Each time a NCCL communicator is created, \texttt{ncclProfilerPluginLoad}\ncclref{src/plugin/profiler.cc} is called, 
 where NCCL looks for a shared library that represents the profiler plugin by checking an environment variable. 
-It then calls \texttt{dlopen}\footnote{\url{https://github.com/NVIDIA/nccl/tree/master/src/plugin/plugin_open.cc}} and \texttt{dlsym} to load the library immediately with local symbol visibility:
+It then calls \texttt{dlopen}\ncclref{src/plugin/plugin_open.cc} and \texttt{dlsym} to load the library immediately with local symbol visibility:
 \begin{lstlisting}[language=C]
 profilerName = ncclGetEnv("NCCL_PROFILER_PLUGIN");
 // ...
@@ -466,8 +477,8 @@ handle* = dlopen(name, RTLD_NOW | RTLD_LOCAL);
 ncclProfiler_v5 = (ncclProfiler_v5_t*)dlsym(handle, "ncclProfiler_v5");
 \end{lstlisting}
 If the library has already been loaded on the process, this procedure is skipped. \\
-A \texttt{profilerPluginRefCount} keeps track of the number of calls to this procedure to ensure correct unloading during finalization.
-See Fig.~\ref{fig:profiler-init}. The NCCL documentation\footnote{\url{https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html\#nccl-profiler-plugin}} also describes some further loading logic:
+A \texttt{profilerPluginRefCount} keeps track of the number of calls to this procedure to ensure correct unloading during finalization (Fig.~\ref{fig:profiler-init}). 
+The NCCL documentation\cite{nccl-docs} also details further the loading behavior:
 
 \begin{quote}
 \begin{itemize}
@@ -479,13 +490,13 @@ See Fig.~\ref{fig:profiler-init}. The NCCL documentation\footnote{\url{https://d
 \end{quote}
 
 
-The plugin loading mechanism expects the struct variable name to follow the naming convention\\ 
+The plugin loading mechanism expects the variable name to follow the naming convention\\ 
 \texttt{ncclProfiler\_v\{versionNum\}}, which also indicates the API version.
 
 The profiler API has changed multiple times with newer NCCL releases. 
-NCCL features a fallback mechanism to load older struct versions.
-However one instance is known, where a profiler plugin being developed against the NCCL release 2.25.1 with Profiler API version 2, was unable to run with the latest NCCL release\footnote{\url{https://github.com/variemai/ncclsee}}.
-Around this time, the NCCL repository has undergone a refactor related to the profiler plugin.
+NCCL features a fallback mechanism to load older versions.
+However one instance is known, where a profiler plugin being developed against the NCCL release 2.25.1 with Profiler API version 2, was unable to run with the latest NCCL release\cite{ncclsee}.
+Around this point in time, the NCCL repository has undergone a refactor related to the profiler plugin.
 % NCCL developers may be required to actively maintain older API versions, to ensure they safely work when old behaviour is getting deprecated 
 % and do not unexpectedly get handed new features from new API versions, 
 % of which the an older Profiler Plugin is not aware of (when faithfully implementing the old API version).
@@ -538,7 +549,7 @@ We show three participants: \emph{User}, \emph{NCCL}, and \emph{Profiler plugin}
 \scalebox{0.95}{%
 \begin{sequencediagram}
 \newthread{user}{User}
-\newinst[1.7]{nccl}{NCCL init.cc}
+\newinst[1.7]{nccl}{NCCL}
 % \newinst[1]{profilercc}{NCCL profiler.cc}
 \newinst[2.7]{proxy}{ProxyProgress}
 \newinst[1]{plug}{Profiler Plugin}
@@ -581,13 +592,13 @@ We show three participants: \emph{User}, \emph{NCCL}, and \emph{Profiler plugin}
 \end{call}
 \end{sequencediagram}%
 }
-\caption{User API $\to$ NCCL communicator init $\to$ load profiler plugin and call \texttt{profiler->init}.}
+\caption{User API $\to$ NCCL communicator init $\to$ load profiler plugin and call profiler->init().}
 \label{fig:profiler-init}
 \end{figure}
 
 \subsection{Profiler API}
 
-The plugin must implement a profiler API specified by NCCL by exposing a struct\footnote{\url{https://github.com/NVIDIA/nccl/tree/master/src/include/plugin/profiler/profiler_v5.h}}. 
+The plugin must implement a profiler API specified by NCCL by exposing a struct\ncclref{src/include/plugin/profiler/profiler_v5.h}. 
 This struct should contain pointers to all functions required by the API. 
 A plugin may expose multiple versioned structs for backwards compatibility with older NCCL versions.
 
@@ -603,14 +614,14 @@ ncclProfiler_v5_t ncclProfiler_v5 = {
 \end{lstlisting}
 
 As of NCCL v2.29.2, version 6 is the latest, which was released on on Dec 24, 2025. 
-This release happened well after the begin of the study, so the focus will be on version 5.
-Version 6 introduced additional profiler API callbacks for Copy-Engine based collective operations, 
+This release happened well after the begin of the study, so the focus will remain on version 5.
+Version 6 introduced additional profiler features for Copy-Engine based collective operations, 
 otherwise version 6 and version 5 remain the same.
 
 Five functions must be implemented for the API. 
-Internally NCCL wraps calls to the profiler API in custom functions which are all declared in a single file\footnote{\url{https://github.com/NVIDIA/nccl/tree/master/src/include/profiler.h}}.
+Internally NCCL wraps all calls to the profiler API in custom functions which are all neatly declared in a single file\ncclref{src/include/profiler.h}.
 
-NCCL invokes the profiler API at different levels to capture start/stop of NCCL groups, collectives, P2P, proxy, kernel and network activity. 
+NCCL invokes the profiler API in different code regions to capture start and stop of NCCL groups, collectives, P2P, proxy, kernel and network activity. 
 As the API function names suggest, this will allow the profiler to track these operations and activities as events.
 
 The API functions and where NCCL invokes them are explained in the following sections.
@@ -642,8 +653,8 @@ If the profiler plugin \texttt{init} function does not return \texttt{ncclSucces
 \texttt{void** context} is an opaque handle that the plugin developer may point to any custom context object; this pointer is passed again in \texttt{startEvent} and \texttt{finalize}. 
 This context object is separate per communicator.
 
-The plugin developer should set \texttt{int* eActivationMask} to a bitmask\footnote{\url{https://github.com/NVIDIA/nccl/tree/master/src/include/plugin/nccl_profiler.h}}, 
-indicating which event types the profiler wants to track:
+The plugin developer should set \texttt{int* eActivationMask} to a bitmask, 
+indicating which event types the profiler wants to track\ncclref{src/include/plugin/nccl_profiler.h}:
 \begin{lstlisting}[language=C]
 enum {
   ncclProfileGroup          = (1 << 0),  // group event type
@@ -683,17 +694,18 @@ ncclResult_t startEvent(
 
 As of release v2.29.2 NCCL does not use the return value. 
 \texttt{void** eHandle} may point to a custom event object; this pointer is passed again in \texttt{stopEvent} and \texttt{recordEventState}. 
-\texttt{eDescr}\footnote{\url{https://github.com/NVIDIA/nccl/tree/master/src/include/plugin/profiler/profiler_v5.h}} describes the started event. 
+\texttt{eDescr} describes the started event\ncclref{src/include/plugin/profiler/profiler_v5.h}. 
 
 The field \texttt{void* parentObj} in the event descriptor is the \texttt{eHandle} of a parent event (or null).
 The use of this field can be explained as following:
 
-All User API calls to Collective or P2P operations will start a Group API event.
+All User API calls to Collective or Point-to-Point operations will start a Group API event.
 When networking is required, ProxyCtrl Events may be emitted. 
 Depending on the \texttt{eActivationMask} bitmask returned in the \texttt{init} function, 
 further (child) events will be emitted in deeper regions of the nccl code base. 
-It can be thought of as an event hierarchy\footnote{\url{https://github.com/NVIDIA/nccl/tree/master/ext-profiler/README.md}} with several depth levels:
+It can be thought of as an event hierarchy\ncclref{ext-profiler/README.md} with several depth levels:
 \begin{quote}
+\begin{spacing}{0.75}
 \begin{lstlisting}[style=ascii]
 Group API event
     |
@@ -725,6 +737,7 @@ Group API event
 
 ProxyCtrl event
 \end{lstlisting}
+\end{spacing}
 \end{quote}
 
 The \texttt{parentObj} inside \texttt{eDescr} will be a reference to the \texttt{eHandle} of the respective parent event for the current event according to this hierarchy. 
@@ -888,9 +901,9 @@ We show \emph{User}, \emph{NCCL}, and \emph{Profiler plugin}. The User calls NCC
 \end{sequencediagram}%
 }
 \caption{Flow from NCCL API calls to profiler events. 
-In case of \texttt{ncclGroupStart / ncclGroupEnd}. 
-multiple events of everything (except GroupApi) are called. 
-Internally, some Collectives (e.g. ncclAlltoAll) are implemented as multiple p2p ops, triggering many P2pApi and P2p events.}
+Internally, some Collectives (e.g. ncclAlltoAll) are implemented as multiple point-to-point operations, triggering many P2pApi and P2p events.
+For application settings utilizing ncclGroupStart/End, further examples and visualizations are provided in \autoref{sec:code-examples-visualizations}.
+}
 \label{fig:profiler-events}
 \end{figure}
 
@@ -1005,12 +1018,12 @@ We use one participant (ProxyProgress thread) and a loop block. Inside the loop 
 \end{sdblock}
 \end{sequencediagram}%
 }
-\caption{\texttt{ncclProxyProgress}: progressOps emits ProxyStep/KernelCh/NetPlugin events. getPostedOps emits ProxyOp events. Several events ProxyCtrl are also emitted}
+\caption{progressOps emits ProxyStep/KernelCh/NetPlugin events. getPostedOps emits ProxyOp events. Several events ProxyCtrl are also emitted}
 \label{fig:proxy-event-emission}
 \end{figure}
 
 \texttt{op->progress()} progresses transport specific ops. 
-This is implemented as a function pointer type\footnote{\url{https://github.com/NVIDIA/nccl/tree/master/src/include/proxy.h}}.
+This is implemented as a function pointer type\ncclref{src/include/proxy.h}.
 Confusingly the variable is called `op`, although its type is \texttt{ncclProxyArgs} and \emph{not} \texttt{ncclProxyOp}.
 
 \begin{lstlisting}[language=C]
@@ -1024,7 +1037,7 @@ struct ncclProxyArgs {
 \end{lstlisting}
 
 This allows calls to different the implementations of the \texttt{progress} function 
-for different transport methods\footnote{\url{https://github.com/NVIDIA/nccl/tree/master/src/transport/net.cc}}\footnote{\url{https://github.com/NVIDIA/nccl/tree/master/src/transport/coll_net.cc}}\footnote{\url{https://github.com/NVIDIA/nccl/tree/master/src/transport/p2p.cc}}\footnote{\url{https://github.com/NVIDIA/nccl/tree/master/src/transport/shm.cc}}.
+for different transport methods\ncclref{src/transport/net.cc}\ncclref{src/transport/coll_net.cc}\ncclref{src/transport/p2p.cc}\ncclref{src/transport/shm.cc}.
 Each implementations calls the profiler API to inform about a different event type (ProxyStep, KernelCh or Network plugin specific). 
 
 \subsubsection{recordEventState}
@@ -1036,8 +1049,8 @@ Each implementations calls the profiler API to inform about a different event ty
     ncclProfilerEventStateArgs_v5_t* eStateArgs
   );
 \end{lstlisting}
-Some event types can be updated by NCCL through \texttt{recordEventState} (state and attributes)\footnote{\url{https://github.com/NVIDIA/nccl/tree/master/src/include/plugin/profiler/profiler_v5.h}}.
-\texttt{recordEventState} is called in the same functions that call \texttt{startEvent} and are happening after \texttt{startEvent}.
+Some event types can be updated by NCCL through \texttt{recordEventState} (state and attributes)\ncclref{src/include/plugin/profiler/profiler_v5.h}.
+\texttt{recordEventState} is called in the same functions that call \texttt{startEvent}, while always being called after \texttt{startEvent}.
 
 \subsubsection{finalize}
 
@@ -1096,7 +1109,7 @@ We show three participants: \emph{User}, \emph{NCCL}, and \emph{Profiler plugin}
 \end{call}
 \end{sequencediagram}%
 }
-\caption{User API $\to$ \texttt{commReclaim} $\to$ \texttt{finalize} $\to$ plugin unload.}
+\caption{Flow from User API call $\to$ finalize and plugin unload.}
 \label{fig:profiler-finalize}
 \end{figure}
 
@@ -1106,7 +1119,7 @@ The profiler plugin struct also has a \texttt{name} field.
 The name field should point to a character string with the name of the profiler plugin. 
 It will be used for all logging, especially when \texttt{NCCL\_DEBUG=INFO} is set.
 
-\section{Code examples and visualizations}
+\section{Code examples and visualizations}\label{sec:code-examples-visualizations}
 
 The following examples illustrate the profiling behavior for different user application settings:
 
@@ -1211,7 +1224,7 @@ Below follows a full description of the calls to the profiler API induced by the
 First, the profiler API \texttt{init} is called for each rank. 
 This occurs during NCCL's internal communicator creation, 
 when the application calls \texttt{ncclCommInitRank}. 
-After the application calls \texttt{ncclAllReduce},
+After the application calls \\\texttt{ncclAllReduce},
 many Profiler API calls to \texttt{stateEvent}, \texttt{stopEvent}, and \texttt{recordEventState} are triggered:
 Intially, startEvent for the \texttt{groupApi} (green bar) is called.
 Below it, the startEvent and soon the stopEvent for the AllReduce \texttt{collApi} event are called. 
@@ -1220,15 +1233,15 @@ The two bars below represent the \texttt{group} and \texttt{coll} events.
 NCCL also spawns a proxy progress thread per rank, which does additional profiler API calls. 
 The first red \texttt{ProxyCtrl} event shows the proxy progress thread was asleep. 
 Next, a new \texttt{ProxyCtrl} event shows time for the proxy thread to append proxy ops. 
-Then, appended ops start progressing (\texttt{ProxyOps} events), 
+Then, appended ops start progressing triggering \texttt{ProxyOps} events, 
 which in \texttt{op->progress()} starts \texttt{ProxyStep} and \texttt{KernelCh} events 
 that inform about low level network activity in updates via \texttt{recordEventState} like \texttt{ProxyStepRecvGPUWait} (see Fig.~\ref{fig:multi-gpu-single-thread-show-proxystep}).
 Network activity eventually completes and the AllReduce collective finishes. 
 The next \texttt{ProxyCtrl} event only shows the proxy thread sleeping again. 
 Finally, profiler \texttt{finalize} is called, which happens when the application cleans up NCCL communicators and no further communicators are tracked in the profiler in each respective thread.
 
-\texttt{ProxyStep} events are emitted in cross node communication environments. 
-If this type of communication is not required, then \texttt{ProxyStep} events will not happen either.
+\texttt{ProxyStep} events are emitted in environments requiring cross node communication. 
+If this type of communication is not required, then \texttt{ProxyStep} events will not be emitted either.
 
 \begin{figure}[H]
   \centering
@@ -1250,9 +1263,9 @@ If this type of communication is not required, then \texttt{ProxyStep} events wi
   \label{fig:multi-gpu-single-thread-show-proxystep}
 \end{figure}
 
-\subsubsection{Multiple Devices per Thread (ncclGroup)}\label{sec:multiple-devices-per-thread-ncclgroup}
+\subsection{Multiple Devices per Thread (ncclGroup)}\label{sec:multiple-devices-per-thread-ncclgroup}
 
-In this example\footnote{\url{https://github.com/NVIDIA/nccl/tree/master/examples/03_collectives/01_allreduce/}}, one NCCL thread manages all GPUs on the same node. 
+In this example\ncclref{examples/03_collectives/01_allreduce/}, one NCCL thread manages all GPUs on the same node. 
 This is achieved by wrapping communication initialization 
 in \texttt{ncclGroupStart} and \texttt{ncclGroupEnd} for each managed GPU.
 In this orchestration setting, \textbf{NVIDIA's documentation states that collective API calls should also be wrapped in ncclGroup.}
@@ -1291,8 +1304,7 @@ for (int i = 0; i < num_gpus; i++) {
 In this example case, the profiler API behavior remains largely the same:
 The one difference is that NCCL internally calls the profiler API groupApi event 
 only one time in total for aggregated operations within a thread.
-Otherwise all other events are processed as usual and are called their usual amount of times irrespective of \texttt{ncclGroup}.
-This is visualized in Fig.~\ref{fig:single-gpu-single-process-ncclgroup-finalize}.
+Otherwise all other events are processed as usual and are called their usual amount of times irrespective of \texttt{ncclGroup} (Fig.~\ref{fig:single-gpu-single-process-ncclgroup-finalize}).
 This behaviour also holds true within a process. 
 It also holds when grouping (single) collectives for different communicators.
 
@@ -1304,7 +1316,7 @@ It also holds when grouping (single) collectives for different communicators.
   \label{fig:single-gpu-single-process-ncclgroup-finalize}
 \end{figure}
 
-\subsubsection{Aggregated operations}
+\subsection{Aggregated operations}
 In this example, the setting is such that only a single GPU is managed by a thread,
 but multiple collective operations are grouped (i.e. to optimize communication efficiency):
 
@@ -1318,11 +1330,11 @@ ncclCommInitRank(&rootComm, nRanks, rootId, myRank);
 // ...
 
 ncclGroupStart();
-ncclAllReduce( /* ... */ );
-ncclBroadcast( /* ... */ );
-ncclReduce( /* ... */ );
-ncclAllGather( /* ... */ );
-ncclReduceScatter( /* ... */ );
+  ncclAllReduce( /* ... */, rootComm, /* ... */ );
+  ncclBroadcast( /* ... */, rootComm, /* ... */ );
+  ncclReduce( /* ... */, rootComm, /* ... */ );
+  ncclAllGather( /* ... */, rootComm, /* ... */ );
+  ncclReduceScatter( /* ... */, rootComm, /* ... */ );
 ncclGroupEnd();
 
 // ...
@@ -1388,7 +1400,7 @@ slurm 2798216
 TODO this behaviour holds in thread/process/comm combinations how?
 \fi
 
-\section{Performance and scalability of the Profiler Plugin API}
+\section{Performance and scalability}
  
 Experiments were run to assess the performance and scalability of profiler plugins.
 These experiments measure the overhead induced internally by NCCL to serve the profiler plugin, 
@@ -1441,22 +1453,31 @@ ncclProfiler_v5_t ncclProfiler_v5 = {
 
 For testing the performance overhead in collective and P2P operations, \textbf{nccl-tests} from NVIDIA was used\footnote{\url{https://github.com/NVIDIA/nccl-tests}}.
 
-The applications \texttt{sendrecv\_perf} and \texttt{all\_reduce\_perf} were launched with follwing test parameters:
-message size 64\,B, 1\,000\,000 iterations per size, 100 warmup iterations. 
+The applications \texttt{sendrecv\_perf} and \texttt{all\_reduce\_perf} were launched with following test parameters:
+message size \SI{64}{B}, \num{1000000} iterations per size, 100 warmup iterations. 
 Single-node jobs used one node and 4 GPUs; 
 multi-node jobs used 2 nodes, 4 GPUs per node, 8 MPI ranks in total. 
 For each experiment, the application was run once without the profiler and once with the empty profiler plugin.
 
-The Table~\ref{tab:profiler-overhead} shows the average latency per operation (time in $\mu$s) across iterations.
-The empty profiler adds roughly 8 to 9\,$\mu$s overhead per operation in single-node runs (4 GPUs), but introduces negligible overhead in multi-node runs (8 GPUs across 2 nodes).
+All experiments were carried out on nodes of the ZIH HPC Capella cluster. Each node is equipped with 
+4 x Nvidia H100 GPUs and 2 x AMD EPYC 9334 (32 cores) @ 2.7 GHz CPUs.
+% The exact nodes used for each experiment are as follows: 
+% P2P Single-node = c87, 
+% P2P Multi-node = c87 + c93, 
+% Collectives Single-node = c93, 
+% Collectives Multi-node = c73 + c118.
+
+Table~\ref{tab:profiler-overhead} shows the average latency per operation (time in \si{\micro\second}) across iterations.
+The empty profiler adds roughly \SIrange{8}{9}{\micro\second} overhead per operation in single-node runs (4 GPUs), but introduces negligible overhead in multi-node runs (8 GPUs across 2 nodes).
 
 \begin{table}[H]
 \centering
 \caption{Profiler overhead: nccl-tests \texttt{sendrecv\_perf} (P2P) and \texttt{all\_reduce\_perf} (collectives). Latency averaged over 1M iterations.}
 \label{tab:profiler-overhead}
+\scalebox{0.95}{%
 \begin{tabular}{llrr}
 \hline
-Test & Environment & Without profiler ($\mu$s) & With profiler ($\mu$s) \\
+Test & Environment & Without profiler (\si{\micro\second}) & With profiler (\si{\micro\second}) \\
 \hline
 P2P (\texttt{sendrecv\_perf}) & Single-node (4 GPUs) & 14.3 & 23.88 \\
  & Multi-node (2$\times$4 GPUs) & 13.05 & 12.95 \\
@@ -1464,7 +1485,8 @@ P2P (\texttt{sendrecv\_perf}) & Single-node (4 GPUs) & 14.3 & 23.88 \\
 Collectives (\texttt{all\_reduce\_perf}) & Single-node (4 GPUs) & 14.96 & 23.29 \\
  & Multi-node (2$\times$4 GPUs) & 17.99 & 18.34 \\
 \hline
-\end{tabular}
+\end{tabular}%
+}
 \end{table}
 
 \iffalse
@@ -1529,19 +1551,19 @@ uint64_t end_time = get_time_ns();
 \fi
 
 Using the profiler plugin when scaled to many gpus across multiple nodes is effortless 
-and did not require any changes in the profiler plugin for the used code examples and experiments.
+and did not require any changes to the profiler plugin for the used code examples and experiments.
 
 % ---------------------------------------------------------------------------
 \section{Discussion}
 % ---------------------------------------------------------------------------
 
-This section first discusses practical considerations for developers who implement or extend an NCCL profiler plugin, 
+This section first discusses practical considerations for developers who implement or extend a NCCL profiler plugin, 
 as well as known limitations of the current profiling infrastructure, 
-and then shows how the plugin could be integrated with the Score-P measurement infrastructure for HPC-wide tracing and analysis.
+and then shows how the plugin could be integrated with the \mbox{Score-P\xspace} measurement infrastructure for HPC-wide tracing and analysis.
 
-\subsection{Considerations for developers of a Profiler Plugin}
+\subsection{Considerations for developers}
 
-\paragraph{Profiler Visualization.}
+\paragraph{Profiler visualization.}
 The visualization tool used in the code examples is helpful for understanding the internal call behavior to the Profiler API by NCCL
 and will be made available along with this report.
 It may serve as a reference to compare against for other developers that build a profiler plugin or visualizer
@@ -1610,47 +1632,45 @@ Similarly, under heavy CPU load and delayed scheduling of the proxy progress thr
 
 From profiler version 4, NCCL uses a per-channel ring buffer of 64 elements. 
 Each counter is complemented by two timestamps (ptimers) supplied by the NCCL kernel (start and stop of the operation in the kernel). 
-NCCL propagates these timestamps to the profiler plugin so it can convert them to the CPU time domain.
-
-(Source: \textbf{/ext-profiler/README.md})
+NCCL propagates these timestamps to the profiler plugin so it can convert them to the CPU time domain.\ncclref{ext-profiler/README.md}
 
 \subsection{Potential Integration with Score-P}
 
-The Score-P measurement infrastructure\footnote{\url{https://www.vi-hps.org/projects/score-p/overview}} is a highly scalable and easy-to-use tool suite 
+The \mbox{Score-P\xspace} measurement infrastructure\cite{scorep} is a highly scalable and easy-to-use tool suite 
 for profiling and event tracing of HPC applications.
 It supports a number of analysis tools. 
 Currently, it works with Scalasca, Vampir, and Tau and is open for other tools 
 and produces OTF2 traces and CUBE4 profiles.
-Integrating NCCL into Score-P allows developers 
+Integrating NCCL into \mbox{Score-P\xspace} allows developers 
 to see communication collectives alongside the application logic. 
 
 A prerequisite for distributed tracing is the unique identification of process groups. 
-NCCL achieves this via \texttt{ncclGetUniqueId}\footnote{\url{https://github.com/NVIDIA/nccl/tree/master/src/init.cc}} without a central coordinator. 
+NCCL achieves this via \texttt{ncclGetUniqueId}\ncclref{src/init.cc} without a central coordinator. 
 To establish a communicator, one process generates a handle containing
 a random 64-bit \texttt{magic} value from \texttt{/dev/urandom} 
 and the socket \texttt{address} of a new listening socket (IP, port), 
 whose port is chosen by the operating system. 
 This combination avoids collisions across a cluster, 
 ensuring the ID is globally unique in practice.
-A Score-P integration can use these to accurately define Process Groups. 
+A \mbox{Score-p\xspace} integration can use these to accurately define Process Groups. 
 
 The integration could be achieved in two ways, 
 either using a direct Profiler API mapping 
 or via an indirect NVTX/CUPTI annotation:
 
 A direct integration would potentially involve implementing a NCCL profiler plugin 
-that translates the \texttt{startEvent} and \texttt{stopEvent} callbacks into Score-P regions:
-The plugin maps NCCL event descriptors (e.g., ncclAllReduce) to Score-P regions using the instrumentation macros
-(e.g., \\\texttt{SCOREP\_USER\_REGION\_BY\_NAME\_BEGIN}/\texttt{END}).
+that translates the \texttt{startEvent} and \texttt{stopEvent} callbacks into \mbox{Score-P\xspace} regions:
+The plugin maps NCCL event descriptors (e.g., ncclAllReduce) to \mbox{Score-P\xspace} regions using \mbox{Score-P\xspace} instrumentation
+(e.g., \\\texttt{SCOREP\_EnterRegion} and \texttt{SCOREP\_ExitRegion} or \\\texttt{SCOREP\_USER\_REGION\_BY\_NAME\_BEGIN}/\texttt{END}).
 
 Alternatively, the NCCL profiler plugin can act as a bridge to NVIDIA's Tools Extension (NVTX). 
-If Score-P has been built with CUDA support it can intercept NVTX ranges.
-The NCCL profiler plugin would emit \texttt{nvtxRangePush}\footnote{\url{https://nvidia.github.io/NVTX/doxygen/group___m_a_r_k_e_r_s___a_n_d___r_a_n_g_e_s.html}} and \texttt{nvtxRangePop} around NCCL operations. 
-Score-P records these as labeled regions without requiring the plugin to link directly against Score-P libraries.
-This approach decouples the NCCL plugin from the Score-P build environment
-and instead relies on Score-P's internal NVTX-to-OTF2 mapping logic.
+If \mbox{Score-P\xspace} has been built with CUDA support it can intercept NVTX ranges.
+The NCCL profiler plugin would emit \texttt{nvtxRangePush}\cite{nvtx} and \texttt{nvtxRangePop} around NCCL operations. 
+\mbox{Score-P\xspace} records these as labeled regions without requiring the plugin to link directly against \mbox{Score-P\xspace} libraries.
+This approach decouples the NCCL plugin from the \mbox{Score-P\xspace} build environment
+and instead relies on \mbox{Score-P's\xspace} internal NVTX-to-OTF2 mapping logic.
 
-The plugin can utilize \texttt{cuptiActivityPush/PopExternalCorrelationId} to capture GPU activity 
+The plugin could also directly utilize \texttt{cuptiActivityPush/PopExternalCorrelationId} to capture GPU activity 
 during the \texttt{startEvent} and \texttt{stopEvent} of \texttt{KernelLaunch} events, 
 while incrementing a thread-safe correlation ID (see Fig.~\ref{fig:cupti-example}).
 CUPTI can be initialized and cleaned up within the profiler plugin's \texttt{init} and \texttt{finalize} functions.
@@ -1667,20 +1687,20 @@ CUPTI can be initialized and cleaned up within the profiler plugin's \texttt{ini
 % ---------------------------------------------------------------------------
 
 This study examined the NCCL Profiler Plugin API 
-and its suitability for integration with Score-P.
+and its suitability for integration with \mbox{Score-P\xspace}.
 It provided background on NCCL and its design, 
 explained how the profiler plugin is loaded 
 and described the API definition with its five core callbacks 
 \texttt{init}, \texttt{startEvent}, \texttt{stopEvent}, \\\texttt{recordEventState} and \texttt{finalize}.
 Code examples and visualizations illustrate the event flow from API calls to NCCL's internal profiler callbacks.
-Performance experiments showed that an empty profiler adds roughly 8--9\,$\mu$s overhead per operation in single-node runs 
+Performance experiments showed that an empty profiler adds roughly \SIrange{8}{9}{\micro\second} overhead per operation in single-node runs 
 but introduces negligible overhead in multi-node runs, and scaling to many GPUs across nodes required no changes to the profiler plugin. 
-The discussion covered developer considerations, known limitations, and a potential integration strategy with Score-P.
+The discussion covered developer considerations, known limitations, and a potential integration strategy with \mbox{Score-P\xspace}.
 
 The NCCL Profiler API allows for highly customized plugins tailored to the analysis needs, 
-whether for simple timing, kernel tracing via CUPTI, or integration with external tools such as Score-P. 
+whether for simple timing, kernel tracing via CUPTI, or integration with external tools such as \mbox{Score-P\xspace}. 
 A notable advantage is its low overhead: 
-NVIDIA advertises their \texttt{inspector}\footnote{\url{https://github.com/NVIDIA/nccl/tree/master/ext-profiler/inspector}} implementation as efficient enough for ``always-on'' profiling in production. 
+NVIDIA advertises their \texttt{inspector}\ncclref{ext-profiler/inspector} implementation as efficient enough for ``always-on'' profiling in production. 
 On the downside, profiler plugins may require maintenance and active development, since NCCL is actively developed. 
 API versions evolve and new features are being introduced.
 

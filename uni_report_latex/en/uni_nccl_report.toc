@@ -3,29 +3,29 @@
 \contentsline {section}{\numberline {2}Introduction to NCCL}{2}{section.2}%
 \contentsline {subsection}{\numberline {2.1}Comparison to MPI}{2}{subsection.2.1}%
 \contentsline {subsection}{\numberline {2.2}Relevant NCCL internals}{3}{subsection.2.2}%
-\contentsline {section}{\numberline {3}Profiler Plugin}{6}{section.3}%
+\contentsline {section}{\numberline {3}Profiler Plugin}{3}{section.3}%
 \contentsline {subsection}{\numberline {3.1}Profiler plugin loading mechanism}{6}{subsection.3.1}%
-\contentsline {subsection}{\numberline {3.2}Profiler API}{8}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.2}Profiler API}{7}{subsection.3.2}%
 \contentsline {subsubsection}{\numberline {3.2.1}init}{8}{subsubsection.3.2.1}%
 \contentsline {subsubsection}{\numberline {3.2.2}startEvent}{9}{subsubsection.3.2.2}%
-\contentsline {subsubsection}{\numberline {3.2.3}stopEvent}{11}{subsubsection.3.2.3}%
-\contentsline {subsubsection}{\numberline {3.2.4}recordEventState}{14}{subsubsection.3.2.4}%
-\contentsline {subsubsection}{\numberline {3.2.5}finalize}{14}{subsubsection.3.2.5}%
-\contentsline {subsubsection}{\numberline {3.2.6}name}{15}{subsubsection.3.2.6}%
-\contentsline {section}{\numberline {4}Code examples and visualizations}{15}{section.4}%
-\contentsline {subsection}{\numberline {4.1}One Device per Thread}{17}{subsection.4.1}%
-\contentsline {subsubsection}{\numberline {4.1.1}Multiple Devices per Thread (ncclGroup)}{19}{subsubsection.4.1.1}%
-\contentsline {subsubsection}{\numberline {4.1.2}Aggregated operations}{21}{subsubsection.4.1.2}%
-\contentsline {section}{\numberline {5}Performance and scalability of the Profiler Plugin API}{22}{section.5}%
-\contentsline {section}{\numberline {6}Discussion}{24}{section.6}%
-\contentsline {subsection}{\numberline {6.1}Considerations for developers of a Profiler Plugin}{24}{subsection.6.1}%
-\contentsline {paragraph}{\nonumberline Profiler Visualization.}{24}{paragraph*.1}%
-\contentsline {paragraph}{\nonumberline Correlating Collective Events with \texttt {seqNumber}.}{24}{paragraph*.2}%
-\contentsline {paragraph}{\nonumberline Tracing low level activity back to NCCL API calls with \texttt {parentObj}.}{25}{paragraph*.3}%
-\contentsline {paragraph}{\nonumberline Process origin for profiler callbacks with PXN enabled.}{25}{paragraph*.4}%
-\contentsline {paragraph}{\nonumberline Tracking communicator parent--child relationships.}{26}{paragraph*.5}%
-\contentsline {subsection}{\numberline {6.2}Known limitations}{26}{subsection.6.2}%
-\contentsline {subsection}{\numberline {6.3}Potential Integration with Score-P}{26}{subsection.6.3}%
-\contentsline {section}{\numberline {7}Conclusion}{27}{section.7}%
-\providecommand \tocbasic@end@toc@file {}\tocbasic@end@toc@file 
+\contentsline {subsubsection}{\numberline {3.2.3}stopEvent}{10}{subsubsection.3.2.3}%
+\contentsline {subsubsection}{\numberline {3.2.4}recordEventState}{13}{subsubsection.3.2.4}%
+\contentsline {subsubsection}{\numberline {3.2.5}finalize}{13}{subsubsection.3.2.5}%
+\contentsline {subsubsection}{\numberline {3.2.6}name}{14}{subsubsection.3.2.6}%
+\contentsline {section}{\numberline {4}Code examples and visualizations}{14}{section.4}%
+\contentsline {subsection}{\numberline {4.1}One Device per Thread}{16}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}Multiple Devices per Thread (ncclGroup)}{18}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}Aggregated operations}{20}{subsection.4.3}%
+\contentsline {section}{\numberline {5}Performance and scalability}{21}{section.5}%
+\contentsline {section}{\numberline {6}Discussion}{23}{section.6}%
+\contentsline {subsection}{\numberline {6.1}Considerations for developers}{23}{subsection.6.1}%
+\contentsline {paragraph}{\nonumberline Profiler visualization.}{23}{paragraph*.1}%
+\contentsline {paragraph}{\nonumberline Correlating Collective Events with \texttt {seqNumber}.}{23}{paragraph*.2}%
+\contentsline {paragraph}{\nonumberline Tracing low level activity back to NCCL API calls with \texttt {parentObj}.}{24}{paragraph*.3}%
+\contentsline {paragraph}{\nonumberline Process origin for profiler callbacks with PXN enabled.}{24}{paragraph*.4}%
+\contentsline {paragraph}{\nonumberline Tracking communicator parent--child relationships.}{25}{paragraph*.5}%
+\contentsline {subsection}{\numberline {6.2}Known limitations}{25}{subsection.6.2}%
+\contentsline {subsection}{\numberline {6.3}Potential Integration with Score-P}{25}{subsection.6.3}%
+\contentsline {section}{\numberline {7}Conclusion}{26}{section.7}%
+\contentsline {section}{\nonumberline References}{28}{section*.6}%
 \providecommand \tocbasic@end@toc@file {}\tocbasic@end@toc@file 

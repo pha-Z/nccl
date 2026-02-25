@@ -197,6 +197,12 @@ INPUT c:/a/texlive/2025/texmf-dist/tex/latex/float/float.sty
 INPUT c:/a/texlive/2025/texmf-dist/tex/latex/float/float.sty
 INPUT c:/a/texlive/2025/texmf-dist/tex/latex/lineno/lineno.sty
 INPUT c:/a/texlive/2025/texmf-dist/tex/latex/lineno/lineno.sty
+INPUT c:/a/texlive/2025/texmf-dist/tex/latex/siunitx/siunitx.sty
+INPUT c:/a/texlive/2025/texmf-dist/tex/latex/siunitx/siunitx.sty
+INPUT c:/a/texlive/2025/texmf-dist/tex/latex/translations/translations.sty
+INPUT c:/a/texlive/2025/texmf-dist/tex/latex/translations/translations.sty
+INPUT c:/a/texlive/2025/texmf-dist/tex/latex/tools/xspace.sty
+INPUT c:/a/texlive/2025/texmf-dist/tex/latex/tools/xspace.sty
 INPUT c:/a/texlive/2025/texmf-dist/tex/latex/pgf/frontendlayer/tikz.sty
 INPUT c:/a/texlive/2025/texmf-dist/tex/latex/pgf/frontendlayer/tikz.sty
 INPUT c:/a/texlive/2025/texmf-dist/tex/latex/pgf/basiclayer/pgf.sty
@@ -384,30 +390,17 @@ INPUT c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/helvetic/phvb8t.vf
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/helvetic/phvb8r.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/helvetic/phvb8t.vf
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/helvetic/phvb8r.tfm
+INPUT c:/a/texlive/2025/texmf-dist/tex/latex/translations/translations-basic-dictionary-english.trsl
+INPUT c:/a/texlive/2025/texmf-dist/tex/latex/translations/translations-basic-dictionary-english.trsl
+INPUT c:/a/texlive/2025/texmf-dist/tex/latex/translations/translations-basic-dictionary-english.trsl
+INPUT c:/a/texlive/2025/texmf-dist/tex/latex/translations/translations-basic-dictionary-german.trsl
+INPUT c:/a/texlive/2025/texmf-dist/tex/latex/translations/translations-basic-dictionary-german.trsl
+INPUT c:/a/texlive/2025/texmf-dist/tex/latex/translations/translations-basic-dictionary-german.trsl
+INPUT c:/a/texlive/2025/texmf-dist/tex/latex/translations/translations-basic-dictionary-english.trsl
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/cm/cmr10.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/helvetic/phvb8t.tfm
+INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/times/ptmr8t.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/times/ptmr8t.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/helvetic/phvr8t.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/cm/cmr12.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/cm/cmmi12.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/cm/cmsy10.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/cm/cmex10.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/amsfonts/cmextra/cmex7.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/amsfonts/symbols/msam10.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/amsfonts/symbols/msam10.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/amsfonts/symbols/msam7.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/amsfonts/symbols/msbm10.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/amsfonts/symbols/msbm10.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/amsfonts/symbols/msbm7.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/helvetic/phvb8t.vf
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/helvetic/phvb8r.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/helvetic/phvr8t.vf
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/helvetic/phvr8r.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/times/ptmr8t.tfm
-INPUT ./uni_nccl_report.toc
-INPUT ./uni_nccl_report.toc
-INPUT uni_nccl_report.toc
-OUTPUT uni_nccl_report.toc
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/times/ptmr8t.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/times/ptmr8t.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/public/cm/cmr9.tfm
@@ -429,18 +422,25 @@ INPUT c:/a/texlive/2025/texmf-dist/tex/latex/psnfss/ts1ptm.fd
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/times/ptmr8c.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/times/ptmb8t.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/courier/pcrr8t.tfm
+INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/times/ptmri8t.tfm
+INPUT c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/helvetic/phvr8t.vf
+INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/helvetic/phvr8r.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/times/ptmr8t.vf
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/times/ptmr8r.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/times/ptmr8c.vf
 INPUT c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/times/ptmb8t.vf
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/times/ptmb8r.tfm
+INPUT c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/courier/pcrr8t.vf
+INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/courier/pcrr8r.tfm
+INPUT c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/times/ptmri8t.vf
+INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/times/ptmri8r.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/times/ptmr8t.vf
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/times/ptmr8r.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/courier/pcrr8t.vf
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/courier/pcrr8r.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/times/ptmr8t.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/courier/pcrr8t.vf
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/courier/pcrr8r.tfm
+INPUT c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/times/ptmr8t.vf
+INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/times/ptmr8r.tfm
 INPUT c:/a/texlive/2025/texmf-dist/tex/latex/listings/lstlang1.sty
 INPUT c:/a/texlive/2025/texmf-dist/tex/latex/listings/lstlang1.sty
 INPUT c:/a/texlive/2025/texmf-dist/tex/latex/listings/lstlang1.sty
@@ -450,9 +450,6 @@ INPUT c:/a/texlive/2025/texmf-dist/tex/latex/listings/lstmisc.sty
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/courier/pcrr8t.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/courier/pcrr8t.vf
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/courier/pcrr8r.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/times/ptmri8t.tfm
-INPUT c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/times/ptmri8t.vf
-INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/times/ptmri8r.tfm
 INPUT ./images/multi_gpu_single_thread/finalize alt (2).png
 INPUT ./images/multi_gpu_single_thread/finalize alt (2).png
 INPUT ./images/multi_gpu_single_thread/finalize alt (2).png
@@ -473,6 +470,8 @@ INPUT ./images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/pha
 INPUT ./images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (3).png
 INPUT ./images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (3).png
 INPUT ./images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (3).png
+INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/times/ptmr8c.tfm
+INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/times/ptmr8c.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/courier/pcrb8t.tfm
 INPUT c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/courier/pcrb8t.vf
 INPUT c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/courier/pcrb8r.tfm
@@ -486,8 +485,11 @@ INPUT ./images/ncclgroup stress test/cupti example.png
 INPUT ./images/ncclgroup stress test/cupti example.png
 INPUT ./images/ncclgroup stress test/cupti example.png
 INPUT ./images/ncclgroup stress test/cupti example.png
+INPUT ./uni_nccl_report.bbl
+INPUT ./uni_nccl_report.bbl
+INPUT uni_nccl_report.bbl
 INPUT uni_nccl_report.aux
-INPUT c:/a/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb
+INPUT c:/a/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb
 INPUT c:/a/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb
 INPUT c:/a/texlive/2025/texmf-dist/fonts/type1/urw/courier/ucrb8a.pfb
 INPUT c:/a/texlive/2025/texmf-dist/fonts/type1/urw/courier/ucrr8a.pfb

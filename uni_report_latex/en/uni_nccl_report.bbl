@@ -1,0 +1,28 @@
+\begin{thebibliography}{1}
+
+\bibitem{scorep}
+Andreas~Kn\"upfer et~al.
+\newblock Score-p: Performance measurement infrastructure.
+\newblock \url{https://www.vi-hps.org/projects/score-p/overview}.
+
+\bibitem{nccl-repo}
+{NVIDIA}.
+\newblock {NCCL}: Nvidia collective communication library.
+\newblock \url{https://github.com/NVIDIA/nccl}.
+
+\bibitem{nccl-docs}
+{NVIDIA}.
+\newblock Nccl user guide.
+\newblock \url{https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html\#nccl-profiler-plugin}.
+
+\bibitem{nvtx}
+{NVIDIA}.
+\newblock Nvtx: Markers and ranges.
+\newblock \url{https://nvidia.github.io/NVTX/doxygen/group___m_a_r_k_e_r_s___a_n_d___r_a_n_g_e_s.html}.
+
+\bibitem{ncclsee}
+Ioannis Vardas.
+\newblock ncclee.
+\newblock \url{https://github.com/variemai/ncclsee}.
+
+\end{thebibliography}
