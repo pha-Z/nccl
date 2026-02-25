@@ -216,7 +216,7 @@ struct MyEvent {
   MyContext* ctx;
   void* parentObj;          // Store parentObj to decrement blacklist ref on stop
   bool fromPool;            // Indicates whether this event was allocated from pool or dynamically
-  bool isPxn;               // Indicates whether this event is from pxn pool
+  bool isPxn;               // Indicates whether this event is pxn
   double startTime;
   pid_t startTid;
   pid_t startPid;
@@ -1695,7 +1695,6 @@ ncclResult_t myStopEvent(void* eHandle) {
   if (!eHandle) return ncclSuccess;
   
   MyEvent* event = static_cast<MyEvent*>(eHandle);
-  MyContext* ctx = event->ctx;
   
   writeJsonlEventRecord(event);
 
