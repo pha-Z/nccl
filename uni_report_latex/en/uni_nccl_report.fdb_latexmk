@@ -1,14 +1,14 @@
 # Fdb version 4
-["bibtex uni_nccl_report"] 1772031719.56329 "uni_nccl_report.aux" "uni_nccl_report.bbl" "uni_nccl_report" 1772031734.49076 0
+["bibtex uni_nccl_report"] 1772032223.94145 "uni_nccl_report.aux" "uni_nccl_report.bbl" "uni_nccl_report" 1772032238.09957 0
   "./nccl-refs.bib" 1772025532 1016 fa7a9d13db7543c4334290d3e85eebd4 ""
   "c:/a/texlive/2025/texmf-dist/bibtex/bst/base/plain.bst" 1769773179 20613 bd3fbfa9f64872b81ac57a0dd2ed855f ""
-  "uni_nccl_report.aux" 1772031731 18679 789c1d117136f8d9d2f2fe77220175ca "pdflatex"
+  "uni_nccl_report.aux" 1772032235 18679 c719d51e1dfcc98fb89dfb6729ddf4ac "pdflatex"
   (generated)
   "uni_nccl_report.bbl"
   "uni_nccl_report.blg"
   (rewritten before read)
-["pdflatex"] 1772031720.55889 "c:/Users/morit/Desktop/uni/hauptseminar nccl/nccl/uni_report_latex/en/uni_nccl_report.tex" "uni_nccl_report.pdf" "uni_nccl_report" 1772031734.49263 0
-  "c:/Users/morit/Desktop/uni/hauptseminar nccl/nccl/uni_report_latex/en/uni_nccl_report.tex" 1772031727 80087 0a9bebe687608c6d1067c581a7c7b7a9 ""
+["pdflatex"] 1772032224.94558 "c:/Users/morit/Desktop/uni/hauptseminar nccl/nccl/uni_report_latex/en/uni_nccl_report.tex" "uni_nccl_report.pdf" "uni_nccl_report" 1772032238.1013 0
+  "c:/Users/morit/Desktop/uni/hauptseminar nccl/nccl/uni_report_latex/en/uni_nccl_report.tex" 1772032207 80089 733350c0ead97ae8c0e4958914cf6460 ""
   "c:/a/texlive/2025/texmf-dist/fonts/enc/dvips/base/8r.enc" 1769774499 4850 80dc9bab7f31fb78a000ccfed0e27cab ""
   "c:/a/texlive/2025/texmf-dist/fonts/map/fontname/texfonts.map" 1769775222 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/courier/pcrb8r.tfm" 1769774009 1292 3059476c50a24578715759f22652f3d0 ""
@@ -17,7 +17,6 @@
   "c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/courier/pcrr8t.tfm" 1769774010 1384 4632f5e54900a7dadbb83f555bc61e56 ""
   "c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/helvetic/phvb8r.tfm" 1769775804 4484 b828043cbd581d289d955903c1339981 ""
   "c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/helvetic/phvb8t.tfm" 1769775804 6628 34c39492c0adc454c1c199922bba8363 ""
-  "c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/helvetic/phvr8r.tfm" 1769775804 4712 9ef4d7d106579d4b136e1529e1a4533c ""
   "c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/helvetic/phvr8t.tfm" 1769775804 7040 b2bd27e2bfe6f6948cbc3239cae7444f ""
   "c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/times/ptmb8r.tfm" 1769780713 4524 6bce29db5bc272ba5f332261583fee9c ""
   "c:/a/texlive/2025/texmf-dist/fonts/tfm/adobe/times/ptmb8t.tfm" 1769780713 6880 f19b8995b61c334d78fc734065f6b4d4 ""
@@ -56,14 +55,12 @@
   "c:/a/texlive/2025/texmf-dist/fonts/type1/urw/courier/ucrb8a.pfb" 1769774010 50493 4ed1f7e9eba8f1f3e1ec25195460190d ""
   "c:/a/texlive/2025/texmf-dist/fonts/type1/urw/courier/ucrr8a.pfb" 1769774010 45758 19968a0990191524e34e1994d4a31cb6 ""
   "c:/a/texlive/2025/texmf-dist/fonts/type1/urw/helvetic/uhvb8a.pfb" 1769775804 35941 adef23a721dd8354a4a2bf4434f1c484 ""
-  "c:/a/texlive/2025/texmf-dist/fonts/type1/urw/helvetic/uhvr8a.pfb" 1769775804 44648 23115b2a545ebfe2c526c3ca99db8b95 ""
   "c:/a/texlive/2025/texmf-dist/fonts/type1/urw/times/utmb8a.pfb" 1769780713 44729 fea0975e20ec51c992338362f05f1146 ""
   "c:/a/texlive/2025/texmf-dist/fonts/type1/urw/times/utmr8a.pfb" 1769780713 46026 687528a208fbfc1f00832bb96cccebbb ""
   "c:/a/texlive/2025/texmf-dist/fonts/type1/urw/times/utmri8a.pfb" 1769780713 45458 504e2b06fa82109d168c7a0afb09e145 ""
   "c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/courier/pcrb8t.vf" 1769774010 2184 5d20c8b00cd914e50251116c274e2d0b ""
   "c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/courier/pcrr8t.vf" 1769774010 2184 8475af1b9cfa983db5f46f5ed4b8f9f7 ""
   "c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/helvetic/phvb8t.vf" 1769775804 2340 0efed6a948c3c37d870e4e7ddb85c7c3 ""
-  "c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/helvetic/phvr8t.vf" 1769775804 2344 44ff28c9ef2fc97180cd884f900fee71 ""
   "c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/times/ptmb8t.vf" 1769780713 2340 df9c920cc5688ebbf16a93f45ce7bdd3 ""
   "c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/times/ptmr8c.vf" 1769780713 3556 8a9a6dcbcd146ef985683f677f4758a6 ""
   "c:/a/texlive/2025/texmf-dist/fonts/vf/adobe/times/ptmr8t.vf" 1769780713 2348 91706c542228501c410c266421fbe30c ""
@@ -251,10 +248,10 @@
   "images/ncclgroup stress test/cupti example (2).png" 1772031588 152959 567350babadbb305bca839d81d6b7515 ""
   "images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (4).png" 1772030344 209213 6bd627bc516cfcb855ac7e12447a8d14 ""
   "images/ncclgroup stress test/ncclgroup commA 1 collX + commB 1 collY/phase 4, 3rd iter (2).png" 1772030959 177006 4af6b53a052e6093cb291cffa27303c8 ""
-  "uni_nccl_report.aux" 1772031731 18679 789c1d117136f8d9d2f2fe77220175ca "pdflatex"
-  "uni_nccl_report.bbl" 1772031720 792 60a1d086c8b4126d5c052d66a69b6255 "bibtex uni_nccl_report"
-  "uni_nccl_report.tex" 1772031727 80087 0a9bebe687608c6d1067c581a7c7b7a9 ""
-  "uni_nccl_report.toc" 1772031731 2667 3bf348b02853d9a4671af1345313dceb "pdflatex"
+  "uni_nccl_report.aux" 1772032235 18679 c719d51e1dfcc98fb89dfb6729ddf4ac "pdflatex"
+  "uni_nccl_report.bbl" 1772032224 792 60a1d086c8b4126d5c052d66a69b6255 "bibtex uni_nccl_report"
+  "uni_nccl_report.tex" 1772032207 80089 733350c0ead97ae8c0e4958914cf6460 ""
+  "uni_nccl_report.toc" 1772032235 2667 3bf348b02853d9a4671af1345313dceb "pdflatex"
   "zihpub.cls" 1768756736 29131 3108874e06535752854ec17b60274762 ""
   (generated)
   "uni_nccl_report.aux"

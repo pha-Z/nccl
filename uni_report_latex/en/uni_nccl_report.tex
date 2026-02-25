@@ -69,7 +69,7 @@
 
 \begin{document}
 
-\linenumbers
+% \linenumbers
 
 % ---------------------------------------------------------------------------
 \section{Abstract}
@@ -102,25 +102,25 @@ Before taking a closer look at the Profiler Plugin API, it is helpful to have so
 \subsection{Comparison to MPI}
 Although NCCL is inspired by the Message Passing Interface (MPI) in terms of API design and usage patterns, there are notable differences due to their respective focuses:
 \begin{itemize}
-\item \textbf{MPI}: Communication is CPU-based. A rank corresponds to a single CPU process within a communicator.
+\item \textbf{MPI}: Communication is process-based. A rank corresponds to a single host process within a communicator.
 \item \textbf{NCCL}: Communication is GPU-based, with CPU threads handling orchestration. 
 A rank corresponds to a GPU device within a communicator, 
-where the mapping from ranks to devices is surjective. 
+where the mapping from ranks to devices is bijective. 
 A single CPU thread can manage multiple ranks (i.e. multiple devices) in a communicator using the functions \texttt{ncclGroupStart} and \texttt{ncclGroupEnd}. 
 A CPU thread can also manage multiple ranks from \emph{different} communicators (i.e. same device alloted by ranks from different communicators through communicator creation with \texttt{ncclCommSplit} or \texttt{ncclCommShrink}),
-so the mapping from ranks to threads is also surjective.
+so the mapping from ranks to threads is surjective.
 \end{itemize}
 
 \subsection{Relevant NCCL internals}
-It helps to understand what NCCL does internally when an application calls the NCCL User API.
+For certain behaviors of the Profiler API, it is helpful to first understand what NCCL does internally when an application calls the NCCL User API.
 
 A typical NCCL application follows this basic structure:
 
 \begin{itemize}
-  \item create nccl communicators
+  \item create NCCL communicators
   \item allocate memory for computation and communication
   \item do computation and communication
-  \item clean up nccl communicators
+  \item clean up NCCL communicators
 \end{itemize}
 
 During NCCL communicator creation, NCCL internally spawns a thread called \texttt{ProxyService}. 
@@ -546,7 +546,7 @@ We show three participants: \emph{User}, \emph{NCCL}, and \emph{Profiler plugin}
 
 \begin{figure}[H]
 \centering
-\scalebox{0.95}{%
+\scalebox{0.98}{%
 \begin{sequencediagram}
 \newthread{user}{User}
 \newinst[1.7]{nccl}{NCCL}
@@ -632,7 +632,9 @@ The API functions and where NCCL invokes them are explained in the following sec
 \texttt{init} is called immediately after \\\texttt{ncclProfilerPluginLoad}, 
 which happens every time a communicator is created 
 (see Fig.~\ref{fig:profiler-init}). 
-This may happen multiple times for the same profiler instance, if further communicators are created on that process. 
+This may happen multiple times for the same profiler instance, 
+if multiple GPU ranks are managed in the same process 
+or if further communicators are created on that process.
 NCCL passes follwing arguments:
 
 \begin{lstlisting}[language=C]
@@ -671,7 +673,7 @@ enum {
   ncclProfileKernelLaunch   = (1 << 11), // Kernel launch events
 };
 \end{lstlisting}
-The default value is to 0, which means no events are tracked by the profiler. 
+The default value is 0, which means no events are tracked by the profiler. 
 Setting it to 4095 will track all events.
 
 \texttt{ncclDebugLogger\_t logfn} is a function pointer to NCCL's internal debug logger \\(\texttt{ncclDebugLog}). 
@@ -702,7 +704,7 @@ The use of this field can be explained as following:
 All User API calls to Collective or Point-to-Point operations will start a Group API event.
 When networking is required, ProxyCtrl Events may be emitted. 
 Depending on the \texttt{eActivationMask} bitmask returned in the \texttt{init} function, 
-further (child) events will be emitted in deeper regions of the nccl code base. 
+further (child) events will be emitted in deeper regions of the NCCL code base. 
 It can be thought of as an event hierarchy\ncclref{ext-profiler/README.md} with several depth levels:
 \begin{quote}
 \begin{spacing}{0.75}
@@ -1124,9 +1126,9 @@ It will be used for all logging, especially when \texttt{NCCL\_DEBUG=INFO} is se
 The following examples illustrate the profiling behavior for different user application settings:
 
 \begin{itemize}
-  \item One Device per Thread
-  \item Multiple Devices per Thread via \texttt{ncclGroupStart} and \texttt{ncclGroupEnd}
-  \item One Device per Thread and aggregated operations via \texttt{ncclGroupStart} and \texttt{ncclGroupEnd}
+  \item one device per thread
+  \item multiple devices per thread via \texttt{ncclGroupStart} and \texttt{ncclGroupEnd}
+  \item one device per thread and aggregated operations via \texttt{ncclGroupStart} and \texttt{ncclGroupEnd}.
   % \item Multiple Devices per Thread and aggregated operations utilizting \texttt{ncclGroupStart} and \texttt{ncclGroupEnd}
 \end{itemize}
 
@@ -1189,7 +1191,7 @@ that ingests the profiler logs to inspect the exact behavior of internal calls f
 It displays the events as colored bars on a timeline and separates them on different lanes.
 Each lane also displays some information about the communicator, rank and thread corresponding
 to the event.
-Additionally, blue dotted lines indicate the relationship between events according to the \texttt{parentObj} field
+Additionally, blue dashed lines indicate the relationship between events according to the \texttt{parentObj} field
 and red lines indicate which collective events belong to the same collective operation.
 
 Further, a hover feature was added to inspect all details of an event, however this feature is not used in the following illustrative examples.
@@ -1258,7 +1260,7 @@ If this type of communication is not required, then \texttt{ProxyStep} events wi
   \caption{One device per thread: In Fig.~\ref{fig:multi-gpu-single-thread-allreduce} ProxyStep events have been omitted for visual clarity. 
   However, in multinode settings, many additional profiler API calls for proxyStep events happen, 
   informing about the low level network steps in their event details via recordEventState (indicated as red circles above each of the event bars).
-  The blue dotted lines indicate the parentObj of each proxyStep event, 
+  The blue dashed lines indicate the parentObj of each proxyStep event, 
   which are the above proxyOp events.}
   \label{fig:multi-gpu-single-thread-show-proxystep}
 \end{figure}
@@ -1305,7 +1307,7 @@ In this example case, the profiler API behavior remains largely the same:
 The one difference is that NCCL internally calls the profiler API groupApi event 
 only one time in total for aggregated operations within a thread.
 Otherwise all other events are processed as usual and are called their usual amount of times irrespective of \texttt{ncclGroup} (Fig.~\ref{fig:single-gpu-single-process-ncclgroup-finalize}).
-This behaviour also holds true within a process. 
+This behavior also holds true within a process. 
 It also holds when grouping (single) collectives for different communicators.
 
 \begin{figure}[H]
@@ -1350,7 +1352,7 @@ The behavior changes can be described as follow:
 \begin{figure}[H]
   \centering
   \includegraphics[width=\textwidth]{"images/ncclgroup stress test/ncclgroup commA 1 collX + commA 1 collY/phase 2.5, 1st iter (4).png"}
-  \caption{one GPU per thread with aggregated operations: multiple collective calls are grouped together and nccl does only a single kernel launch per thread.}
+  \caption{One GPU per thread with aggregated operations: multiple collective calls are grouped together and NCCL does only a single kernel launch per thread.}
   \label{fig:one-gpu-per-thread-grouped-collectives}
 \end{figure}
 
@@ -1550,7 +1552,7 @@ uint64_t end_time = get_time_ns();
 \end{lstlisting}
 \fi
 
-Using the profiler plugin when scaled to many gpus across multiple nodes is effortless 
+Using the profiler plugin when scaled to many GPUs across multiple nodes is effortless 
 and did not require any changes to the profiler plugin for the used code examples and experiments.
 
 % ---------------------------------------------------------------------------
@@ -1610,7 +1612,7 @@ Then \texttt{parentObj} in \texttt{eDescr} is not safe to dereference; the \text
 The \texttt{eDescr} for \texttt{ProxyStep} does not provide this field. However a workaround is possible:
 
 The passed \texttt{context} object in \texttt{startEvent} is also unsafe to dereference due to PXN. 
-the profiler plugin developer may internally track initialized contexts 
+The profiler plugin developer may internally track initialized contexts 
 and whether the passed \texttt{context} belongs to the local process. 
 This is also indicative of PXN.
 
@@ -1622,6 +1624,8 @@ which corresponds to \texttt{comm->commHash}), as well as \texttt{commName}, \te
 there is no \texttt{parentCommId} or similar argument.
 In split/shrink, the \texttt{commHash} of the child node is calculated internally as a one-way digest of the \texttt{commHash} of the parent node and the split parameters (\texttt{splitCount}, \texttt{color}).
 Therefore, the relationship cannot be restored based on the ID alone.
+Exposing a parent communicator identifier (or equivalent) in the plugin API would enable profilers to reconstruct hierarchical communicator topologies 
+and would make for a great addition to future API revisions
 
 \subsection{Known limitations}
 
@@ -1652,7 +1656,7 @@ and the socket \texttt{address} of a new listening socket (IP, port),
 whose port is chosen by the operating system. 
 This combination avoids collisions across a cluster, 
 ensuring the ID is globally unique in practice.
-A \mbox{Score-p\xspace} integration can use these to accurately define Process Groups. 
+A \mbox{Score-P\xspace} integration can use these to accurately define process groups. 
 
 The integration could be achieved in two ways, 
 either using a direct Profiler API mapping 
@@ -1661,7 +1665,7 @@ or via an indirect NVTX/CUPTI annotation:
 A direct integration would potentially involve implementing a NCCL profiler plugin 
 that translates the \texttt{startEvent} and \texttt{stopEvent} callbacks into \mbox{Score-P\xspace} regions:
 The plugin maps NCCL event descriptors (e.g., ncclAllReduce) to \mbox{Score-P\xspace} regions using \mbox{Score-P\xspace} instrumentation
-(e.g., \\\texttt{SCOREP\_EnterRegion} and \texttt{SCOREP\_ExitRegion} or \\\texttt{SCOREP\_USER\_REGION\_BY\_NAME\_BEGIN}/\texttt{END}).
+(e.g., \\\texttt{SCOREP\_EnterRegion} and \texttt{SCOREP\_ExitRegion}).
 
 Alternatively, the NCCL profiler plugin can act as a bridge to NVIDIA's Tools Extension (NVTX). 
 If \mbox{Score-P\xspace} has been built with CUDA support it can intercept NVTX ranges.
