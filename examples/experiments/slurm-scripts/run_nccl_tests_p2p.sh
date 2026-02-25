@@ -53,7 +53,7 @@ mkdir -p "$RESULTS_DIR"
 
 NITER=1000000
 WARMUP=100
-OPTS="-b 8 -e 64K -f 2 -g 4 -n $NITER -w $WARMUP"
+OPTS="-b 8 -e 64 -f 2 -g 4 -n $NITER -w $WARMUP"
 
 echo ""
 echo "=========================================="
