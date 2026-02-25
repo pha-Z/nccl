@@ -1083,7 +1083,7 @@ static bool initCuptiActivity() {
   CUPTI_API_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_MEMSET));
   
   cuptiActivityEnabled = true;
-  fprintf(stdout, "[MinimalProfiler] CUPTI Activity API initialized (following ncclsee pattern)\n");
+  fprintf(stdout, "[MinimalProfiler] CUPTI Activity API initialized\n");
   
   captureCuptiTimestampOffset();
   
