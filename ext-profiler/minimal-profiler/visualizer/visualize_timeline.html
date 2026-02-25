@@ -171,11 +171,11 @@
         #timeline-container {
             background: #e8e8e8;
             border-radius: 5px;
-            padding: 20px;
+            padding: 15px;
             overflow-x: auto;
             overflow-y: auto;
             position: relative;
-            max-height: calc(100vh - 200px);
+            max-height: calc(100vh - 20px);
         }
         
         #timeline-canvas {
@@ -274,7 +274,7 @@
             position: sticky;
             bottom: 0;
             z-index: 100;
-            min-height: 50px;
+            min-height: 30px;
             box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.12);
             width: 25%;
             max-width: 500px;
@@ -2630,22 +2630,27 @@
             // Set canvas size - make it wider if zoomed in to enable horizontal scrolling
             const containerWidth = container.clientWidth - 40;
             // Canvas width scales with zoom: when zoomed in, canvas is wider for horizontal scrolling
-            const canvasWidth = containerWidth * zoom;
-            const containerHeight = Math.max(400, lanes.length * laneHeight + 100);
-            canvas.width = canvasWidth;
-            canvas.height = containerHeight;
-            timelineContentWidth = Math.max(1, canvas.width - LABEL_WIDTH);
+            const logicalCanvasWidth = containerWidth * zoom;
+            const logicalCanvasHeight = Math.max(400, lanes.length * laneHeight + 100);
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = Math.floor(logicalCanvasWidth * dpr);
+            canvas.height = Math.floor(logicalCanvasHeight * dpr);
+            canvas.style.width = logicalCanvasWidth + 'px';
+            canvas.style.height = logicalCanvasHeight + 'px';
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.scale(dpr, dpr);
+            timelineContentWidth = Math.max(1, logicalCanvasWidth - LABEL_WIDTH);
             
             // Clear canvas
             ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillRect(0, 0, logicalCanvasWidth, logicalCanvasHeight);
             
             // Draw time axis (content area only, so labels stay readable)
             ctx.strokeStyle = '#999';
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(LABEL_WIDTH, 20);
-            ctx.lineTo(canvas.width, 20);
+            ctx.lineTo(logicalCanvasWidth, 20);
             ctx.stroke();
             ctx.beginPath();
             ctx.moveTo(LABEL_WIDTH, 0);
@@ -2659,7 +2664,7 @@
             for (let i = 0; i <= numLabels; i++) {
                 const time = minTime + (maxTime - minTime) * (i / numLabels);
                 const x = LABEL_WIDTH + (i / numLabels) * timelineContentWidth + panX;
-                if (x >= LABEL_WIDTH && x <= canvas.width) {
+                if (x >= LABEL_WIDTH && x <= logicalCanvasWidth) {
                     ctx.fillText(`${time.toFixed(0)}μs`, x, 15);
                     ctx.beginPath();
                     ctx.moveTo(x, 20);
@@ -2704,7 +2709,7 @@
                 } else {
                     ctx.fillStyle = LANE_BG[0];
                 }
-                ctx.fillRect(0, y, canvas.width, laneHeight);
+                ctx.fillRect(0, y, logicalCanvasWidth, laneHeight);
                 
                 // Vertical separator between label column and timeline content
                 ctx.strokeStyle = '#bbb';
@@ -2717,7 +2722,7 @@
                 // Draw lane separator
                 ctx.beginPath();
                 ctx.moveTo(0, y + laneHeight);
-                ctx.lineTo(canvas.width, y + laneHeight);
+                ctx.lineTo(logicalCanvasWidth, y + laneHeight);
                 ctx.stroke();
                 
                 // Draw lane label
@@ -2854,16 +2859,16 @@
             // Draw selection rectangle if selecting (content area only)
             if (isSelecting) {
                 const selStartX = Math.max(LABEL_WIDTH, Math.min(selectionStartX, selectionEndX));
-                const selEndX = Math.min(canvas.width, Math.max(selectionStartX, selectionEndX));
+                const selEndX = Math.min(logicalCanvasWidth, Math.max(selectionStartX, selectionEndX));
                 const selWidth = Math.max(0, selEndX - selStartX);
                 
                 if (selWidth > 0) {
                     ctx.fillStyle = 'rgba(21, 101, 192, 0.15)'; // Semi-transparent blue
-                    ctx.fillRect(selStartX, 0, selWidth, canvas.height);
+                    ctx.fillRect(selStartX, 0, selWidth, logicalCanvasHeight);
                     ctx.strokeStyle = '#1565c0';
                     ctx.lineWidth = 2;
                     ctx.setLineDash([5, 5]);
-                    ctx.strokeRect(selStartX, 0, selWidth, canvas.height);
+                    ctx.strokeRect(selStartX, 0, selWidth, logicalCanvasHeight);
                     ctx.setLineDash([]);
                 }
             }
@@ -2947,7 +2952,7 @@
                 
                 if (isSelecting) {
                     // Update selection end position (clamp to content area)
-                    selectionEndX = Math.max(LABEL_WIDTH, Math.min(canvas.width, mouseX));
+                    selectionEndX = Math.max(LABEL_WIDTH, Math.min(logicalCanvasWidth, mouseX));
                     // Redraw to show updated selection
                     renderTimeline();
                     return;
@@ -3037,11 +3042,11 @@
                 if (isSelecting) {
                     const rect = canvas.getBoundingClientRect();
                     const mouseX = e.clientX - rect.left;
-                    selectionEndX = Math.max(LABEL_WIDTH, Math.min(canvas.width, mouseX));
+                    selectionEndX = Math.max(LABEL_WIDTH, Math.min(logicalCanvasWidth, mouseX));
                     
                     // Calculate time range from selection (use content-area coordinates)
                     const selStartX = Math.max(LABEL_WIDTH, Math.min(selectionStartX, selectionEndX));
-                    const selEndX = Math.min(canvas.width, Math.max(selectionStartX, selectionEndX));
+                    const selEndX = Math.min(logicalCanvasWidth, Math.max(selectionStartX, selectionEndX));
                     
                     // Only apply if selection is meaningful (at least 10 pixels wide)
                     if (selEndX - selStartX > 10) {
