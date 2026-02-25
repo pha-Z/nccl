@@ -5,10 +5,10 @@
  * address reuse that would obfuscate parent-child event relationships.
  * 
  * Key features:
- * - Event pool with round-robin allocation to maximize time between address reuse
- * - Blacklist with LRU eviction to prevent reuse of addresses still referenced as parents
+ * - Single process-wide event pool with round-robin allocation to maximize time between address reuse
+ * - Process-wide blacklist with LRU eviction to prevent reuse of addresses still referenced as parents
  * - O(1) operations for all blacklist operations via hash map + doubly linked list
- * - PXN (PCI x NVLink) support for cross-process ProxyOp events
+ * - PXN (PCI x NVLink) support for cross-process ProxyOp events (same pool as normal events)
  * - Kernel record correlation with nccl events via CUPTI API 
  *
  * Code Organization:
@@ -16,7 +16,7 @@
  * 2. Util functions
  * 3. Data structures
  * 4. Process resources requiring thread safety
- * 5. PXN Pool module
+ * 5. Process pool, blacklist, and PXN handling
  * 6. CUPTI activity record tracking
  * 7. Logging
  * 8. Profiler API implementation
@@ -80,9 +80,8 @@ do {                                                                            
 // Environment variable names
 static const char* ENV_EVENT_MASK = "NCCL_PROFILE_EVENT_MASK";
 
-// Pool sizing
-static const size_t INITIAL_POOL_SIZE = 256;             // Initial event pool size per context
-static const size_t INITIAL_PXN_POOL_SIZE = 256;         // Initial size for PXN pool
+// Pool sizing (single process-wide pool for all events including PXN)
+static const size_t INITIAL_POOL_SIZE = 256;
 
 // Blacklist sizing
 static const size_t BLACKLIST_CAP = 10000000;            // 10 million entries max
@@ -91,7 +90,7 @@ static const size_t BLACKLIST_CAP = 10000000;            // 10 million entries m
 static const size_t CUPTI_BUFFER_SIZE = 1024 * 1024 * 8; // 8MB buffers
 
 // Forward declarations
-static bool initPxnPool();
+static bool initProcessPool();
 static bool initJsonlTraceFile(const char* dirname);
 static bool initCuptiActivity();
 static void writeJsonlCuptiActivityRecord(uint32_t kind, uint64_t startTime, uint64_t endTime,
@@ -597,10 +596,6 @@ struct MyContext {
   int nranks;
   double startTime;
   char gpuUuid[37];             // Physical GPU UUID string (36 chars + null terminator)
-  
-  pthread_mutex_t poolBlacklistMutex;   // Protects pool and blacklist
-  EventPool pool;
-  Blacklist blacklist;
 };
 
 // ============================================================================
@@ -635,10 +630,10 @@ static std::atomic<uint64_t> nextCorrelationId(1);  // Global correlation ID cou
 // when outputting CUPTI records, convert timestamp: cpuTime = cuptiTime/1000.0 + offset
 static double cuptiTimestampOffsetUs = 0.0;
 
-// PXN Pool: handles cross-process Proxy events
-static EventPool* pxnPool = nullptr;
-static Blacklist* pxnBlacklist = nullptr;
-static pthread_mutex_t pxnPoolBlacklistMutex = PTHREAD_MUTEX_INITIALIZER;
+// Process-wide event pool and blacklist (shared by all contexts and PXN events)
+static EventPool* processPool = nullptr;
+static Blacklist* processBlacklist = nullptr;
+static pthread_mutex_t poolBlacklistMutex = PTHREAD_MUTEX_INITIALIZER;
 
 // Context registry: tracks all valid context pointers created by this process
 // When PXN routing is enabled, NCCL may pass context pointers from other processes
@@ -649,10 +644,10 @@ static pthread_mutex_t contextRegistryMutex = PTHREAD_MUTEX_INITIALIZER;
 static int activeContextCount = 0;           // Number of active communicators in this process
 
 static void initProcessResources(const char* dirname) {
-  if (initPxnPool()) {
-    fprintf(stdout, "[MinimalProfiler] PXN Pool initialized\n");
+  if (initProcessPool()) {
+    fprintf(stdout, "[MinimalProfiler] Process pool initialized\n");
   } else {
-    fprintf(stderr, "[MinimalProfiler] WARNING: Failed to initialize PXN pool\n");
+    fprintf(stderr, "[MinimalProfiler] WARNING: Failed to initialize process pool\n");
   }
 
   if (initJsonlTraceFile(dirname)) {
@@ -678,12 +673,12 @@ static void cleanupProcessResources() {
   closeSharedJsonlFile();
   pthread_mutex_destroy(&jsonlFileMutex);
   
-  // clean up PXN related resources
-  delete pxnPool;
-  delete pxnBlacklist;
-  pxnPool = nullptr;
-  pxnBlacklist = nullptr;
-  pthread_mutex_destroy(&pxnPoolBlacklistMutex);
+  // Clean up process-wide pool and blacklist
+  delete processPool;
+  delete processBlacklist;
+  processPool = nullptr;
+  processBlacklist = nullptr;
+  pthread_mutex_destroy(&poolBlacklistMutex);
   
   pthread_mutex_lock(&contextRegistryMutex);
   contextRegistry.clear();
@@ -697,9 +692,9 @@ static void cleanupProcessResources() {
 // When PXN routing is enabled, some ProxyOp events may be executed by a different
 // process than the one that originated them. The parentObj pointer in such events
 // points to the originator's address space, which is invalid in the executing process.
-// These events are stored in a separate pool (pxnPool) and we store
-// parentObj as metadata (pointer value) for tracking but never dereference it.
-// We detect PXN events by checking eDescr->proxyOp.pid against getpid().
+// All events (normal and PXN) use the same process-wide pool and blacklist.
+// For PXN events we store parentObj as metadata (pointer value) for blacklist tracking
+// but never dereference it. We detect PXN events by checking eDescr->proxyOp.pid against getpid().
 
 // Check if a context pointer is valid (belongs to this process)
 static bool isValidContext(void* ctx) {
@@ -726,77 +721,76 @@ static void unregisterContext(MyContext* ctx) {
   pthread_mutex_unlock(&contextRegistryMutex);
 }
 
-// Initialize the PXN pool (called on first communicator init)
-static bool initPxnPool() {
-  pxnPool = new (std::nothrow) EventPool();
-  pxnBlacklist = new (std::nothrow) Blacklist();
+// Initialize the process-wide pool and blacklist (called on first communicator init)
+static bool initProcessPool() {
+  processPool = new (std::nothrow) EventPool();
+  processBlacklist = new (std::nothrow) Blacklist();
   
-  if (!pxnPool || !pxnBlacklist) {
-    delete pxnPool;
-    delete pxnBlacklist;
-    pxnPool = nullptr;
-    pxnBlacklist = nullptr;
+  if (!processPool || !processBlacklist) {
+    delete processPool;
+    delete processBlacklist;
+    processPool = nullptr;
+    processBlacklist = nullptr;
     return false;
   }
   
-  if (!pxnPool->init(INITIAL_PXN_POOL_SIZE)) {
-    delete pxnPool;
-    delete pxnBlacklist;
-    pxnPool = nullptr;
-    pxnBlacklist = nullptr;
+  if (!processPool->init(INITIAL_POOL_SIZE)) {
+    delete processPool;
+    delete processBlacklist;
+    processPool = nullptr;
+    processBlacklist = nullptr;
     return false;
   }
   
   return true;
 }
 
-// Allocate an event from the PXN pool
-static MyEvent* allocateFromPxnPool() {
-  if (!pxnPool || !pxnBlacklist) {
+// Allocate an event from the process-wide pool
+static MyEvent* allocateFromProcessPool() {
+  if (!processPool || !processBlacklist) {
     return nullptr;
   }
   
-  pthread_mutex_lock(&pxnPoolBlacklistMutex);
-  MyEvent* event = pxnPool->allocate(*pxnBlacklist);
-  pthread_mutex_unlock(&pxnPoolBlacklistMutex);
-  
-  if (event) {
-    event->isPxn = true;
-    event->fromPool = true;
-  }
+  pthread_mutex_lock(&poolBlacklistMutex);
+  MyEvent* event = processPool->allocate(*processBlacklist);
+  pthread_mutex_unlock(&poolBlacklistMutex);
   
   return event;
 }
 
-// Free an event back to the PXN pool
-static void freeToPxnPool(MyEvent* event) {
-  if (!pxnPool) return;
+// Free an event back to the process-wide pool (or delete if dynamically allocated)
+static void freeToProcessPool(MyEvent* event) {
+  if (!processPool) return;
   
-  pthread_mutex_lock(&pxnPoolBlacklistMutex);
-  pxnPool->free(event);
-  pthread_mutex_unlock(&pxnPoolBlacklistMutex);
-}
-
-// Track a parent address in the PXN blacklist
-static void trackPxnParent(void* parentObj) {
-  if (!parentObj || !pxnBlacklist) return;
-  
-  pthread_mutex_lock(&pxnPoolBlacklistMutex);
-  if (pxnBlacklist->contains(parentObj)) {
-    pxnBlacklist->incrementRef(parentObj);
+  pthread_mutex_lock(&poolBlacklistMutex);
+  if (event->fromPool) {
+    processPool->free(event);
   } else {
-    pxnBlacklist->add(parentObj);
+    delete event;
   }
-  pthread_mutex_unlock(&pxnPoolBlacklistMutex);
+  pthread_mutex_unlock(&poolBlacklistMutex);
 }
 
-// Release a parent address from the PXN blacklist
-static void releasePxnParent(void* parentObj) {
-  if (!parentObj || !pxnBlacklist) return;
+// Track a parent address in the process-wide blacklist
+static void trackParent(void* parentObj) {
+  if (!parentObj || !processBlacklist) return;
   
-  pthread_mutex_lock(&pxnPoolBlacklistMutex);
-  pxnBlacklist->decrementRef(parentObj);
-  pthread_mutex_unlock(&pxnPoolBlacklistMutex);
+  pthread_mutex_lock(&poolBlacklistMutex);
+  if (processBlacklist->contains(parentObj)) {
+    processBlacklist->incrementRef(parentObj);
+  } else {
+    processBlacklist->add(parentObj);
+  }
+  pthread_mutex_unlock(&poolBlacklistMutex);
+}
+
+// Release a parent address from the process-wide blacklist
+static void releaseParent(void* parentObj) {
+  if (!parentObj || !processBlacklist) return;
+  
+  pthread_mutex_lock(&poolBlacklistMutex);
+  processBlacklist->decrementRef(parentObj);
+  pthread_mutex_unlock(&poolBlacklistMutex);
 }
 
 // ============================================================================
@@ -1508,15 +1502,6 @@ ncclResult_t myInit(void** context, uint64_t commId, int* eActivationMask,
   ctx->startTime = getTime();
   snprintf(ctx->gpuUuid, sizeof(ctx->gpuUuid), "%s", gpuUuidStr.c_str());
   
-  if (pthread_mutex_init(&ctx->poolBlacklistMutex, nullptr) != 0) {
-    delete ctx;
-    return ncclInternalError;
-  }
-  if (!ctx->pool.init(INITIAL_POOL_SIZE)) {
-    pthread_mutex_destroy(&ctx->poolBlacklistMutex);
-    delete ctx;
-    return ncclInternalError;
-  }
   registerContext(ctx);  // Register in the process-wide registry for PXN validation
   
   // Write ProfilerInit lifecycle event to JSONL
@@ -1564,44 +1549,23 @@ ncclResult_t myStartEvent(void* context, void** eHandle,
     isPxn = !isValidContext(context);
   }
   
-  // Allocate event from appropriate pool based on context validity
-  if (isPxn) {
-    // PXN event - ctx is invalid, use process-wide pxn pool
-    event = allocateFromPxnPool();
-    if (!event) {
-      *eHandle = nullptr;
-      return ncclSuccess;  // Pool allocation failed - drop this event gracefully
-    }
-    
-    // Track parentObj in pxn blacklist to prevent address reuse. see caveats TODO
-    trackPxnParent(eDescr->parentObj);
+  // Allocate event from process-wide pool (same for normal and PXN events)
+  event = allocateFromProcessPool();
+  if (!event) {
+    *eHandle = nullptr;
+    return ncclSuccess;  // Pool allocation failed - drop this event gracefully
+  }
+  // Track parent in process-wide blacklist to prevent address reuse
+  if (eDescr->parentObj) {
+    trackParent(eDescr->parentObj);
+  }
 
+  if (isPxn) {
     event->ctx = nullptr;        // ctx is invalid for PXN events - don't store it
     event->gpuUuid[0] = '\0';    // Not available for PXN
     event->commId = 0;           // Not available for PXN
     event->rank = -1;            // Not available for PXN
   } else {
-    // Normal event - context is valid, use per-context pool
-    pthread_mutex_lock(&ctx->poolBlacklistMutex);
-    event = ctx->pool.allocate(ctx->blacklist);
-    pthread_mutex_unlock(&ctx->poolBlacklistMutex);
-    
-    if (!event) {
-      *eHandle = nullptr;
-      return ncclSuccess;  // Fail gracefully
-    }
-    
-    // track parent reference in per-context blacklist. see caveats TODO
-    if (eDescr->parentObj) {
-      pthread_mutex_lock(&ctx->poolBlacklistMutex);
-      if (ctx->blacklist.contains(eDescr->parentObj)) {
-        ctx->blacklist.incrementRef(eDescr->parentObj);
-      } else {
-        ctx->blacklist.add(eDescr->parentObj);
-      }
-      pthread_mutex_unlock(&ctx->poolBlacklistMutex);
-    }
-
     event->ctx = ctx;
     snprintf(event->gpuUuid, sizeof(event->gpuUuid), "%s", ctx->gpuUuid);
     event->commId = ctx->commId;
@@ -1744,31 +1708,11 @@ ncclResult_t myStopEvent(void* eHandle) {
     ));
   }
 
-  // Handle detached PXN events from the pxn pool
-  if (event->isPxn) {
-    // Release parent reference and free to pxn pool
-    releasePxnParent(event->parentObj);
-    freeToPxnPool(event);
-    
-    return ncclSuccess;
-  }
-  
-  // Handle normal event from per-context pool
-  if (!ctx) {
-    return ncclSuccess;  // Drop event if ctx is somehow NULL
-  }
+  // Release parent from process-wide blacklist and free event to process pool
   if (event->parentObj) {
-    pthread_mutex_lock(&ctx->poolBlacklistMutex);
-    ctx->blacklist.decrementRef(event->parentObj);
-    pthread_mutex_unlock(&ctx->poolBlacklistMutex);
+    releaseParent(event->parentObj);
   }
-  pthread_mutex_lock(&ctx->poolBlacklistMutex);
-  if (event->fromPool) {
-    ctx->pool.free(event);
-  } else {
-    delete event;
-  }
-  pthread_mutex_unlock(&ctx->poolBlacklistMutex);
+  freeToProcessPool(event);
 
   return ncclSuccess;
 }
@@ -1820,17 +1764,23 @@ ncclResult_t myFinalize(void* context) {
   double finalizeTime = getTime();
   double totalDuration = finalizeTime - ctx->startTime;
   
-  // Write ProfilerFinalize lifecycle event to JSONL
+  // Write ProfilerFinalize lifecycle event to JSONL (process pool stats)
   char buf[64];
   snprintf(buf, sizeof(buf), "%.3f", totalDuration);
+  size_t poolChunks = 0, poolSlots = 0;
+  if (processPool) {
+    pthread_mutex_lock(&poolBlacklistMutex);
+    poolChunks = processPool->chunks.size();
+    poolSlots = processPool->chunks.size() * processPool->chunkSize;
+    pthread_mutex_unlock(&poolBlacklistMutex);
+  }
   std::string detailsJson = "\"totalDuration\":" + std::string(buf) +
-                            ",\"poolChunks\":" + std::to_string(ctx->pool.chunks.size()) +
-                            ",\"poolSlots\":" + std::to_string(ctx->pool.chunks.size() * ctx->pool.chunkSize);
+                            ",\"poolChunks\":" + std::to_string(poolChunks) +
+                            ",\"poolSlots\":" + std::to_string(poolSlots);
   writeJsonlLifecycleEvent("ProfilerFinalize", finalizeTime, ctx->gpuUuid, ctx->commId, ctx->rank, detailsJson);
   
   // Clean up context
   unregisterContext(ctx); // Unregister this context from the process-wide registry
-  pthread_mutex_destroy(&ctx->poolBlacklistMutex);  
   delete ctx;
   
   // Clean up process-wide resources when last communicator is finalized
