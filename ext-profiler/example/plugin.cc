@@ -18,9 +18,18 @@
 
 #define __hidden __attribute__ ((visibility("hidden")))
 
+/*
+ * This file implements a self-contained NCCL v5 profiler plugin. The plugin
+ * records every NCCL callback into fixed-size pools, tracks parent/child
+ * relationships via ref-counts, and optionally dumps the captured hierarchy to
+ * JSON so external tools can visualize collective timelines.
+ */
+
 static int initialized;             // initialization counter for profiler
 static double startTime;            // profiler start time
 
+// Default pool sizing mirrors NCCL’s builtin profiler to keep behavior
+// predictable unless the caller overrides the knobs via environment variables.
 static const int defaultEActivationMask = ncclProfileColl | ncclProfileP2p;
 static const int defaultGroupApiPoolSize = 256;
 static const int defaultCollApiPoolSize = 256;
@@ -32,6 +41,7 @@ static const int defaultP2pPoolSize = 256;
 static const int defaultProxyCtrlPoolSize = 16;
 static const int defaultDetachPoolSize = 256;
 
+// Actual pool sizes are resolved at runtime via env overrides.
 static int groupApiPoolSize;
 static int collApiPoolSize;
 static int p2pApiPoolSize;
@@ -46,15 +56,18 @@ static int detachPoolIndex;
 static int detachPoolDone;
 static struct proxyOp* detachPool;
 
+// NCCL core passes us its logger so we can reuse the existing formatting.
 ncclDebugLogger_t logFn;
 #define INFO(FLAGS, ...) logFn(NCCL_LOG_INFO, (FLAGS), __func__, __LINE__, __VA_ARGS__)
 
+// Helper that returns microseconds since boot; used for all timestamps.
 __hidden double gettime(void) {
   struct timespec t;
   clock_gettime(CLOCK_MONOTONIC, &t);
   return (t.tv_sec*1e6 + (t.tv_nsec*1e-3));
 }
 
+// Shared objects that allow the plugin to coordinate across communicators.
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static pid_t pid;
 static int* eActivationMaskPtr;
@@ -62,8 +75,11 @@ static int* eActivationMaskPtr;
 __hidden ncclResult_t exampleProfilerInit(void** context, uint64_t commId, int* eActivationMask, const char* commName, int nNodes, int nranks, int rank, ncclDebugLogger_t logfn) {
   pthread_mutex_lock(&lock);
   if (__atomic_fetch_add(&initialized, 1, __ATOMIC_RELAXED) == 0) {
-    // first thread initializes event mask, environment and detach pool
+    // First arriving communicator picks up configuration knobs and allocates
+    // the shared detach pool so the rest of the plugin can stay lock-free.
     const char* str;
+    // Each env var optionally overrides the size of a pool; absent entries
+    // fall back to the defaults declared above.
     str = getenv("NCCL_PROFILE_EVENT_MASK");
     __atomic_store_n(eActivationMask, str ? atoi(str) : 0, __ATOMIC_RELAXED);
 
@@ -94,7 +110,8 @@ __hidden ncclResult_t exampleProfilerInit(void** context, uint64_t commId, int* 
     str = getenv("NCCL_PROFILE_PROXY_DETACH_POOL_SIZE");
     detachPoolSize = str ? atoi(str) : defaultDetachPoolSize;
 
-    // detach pool is used to store PXN proxyOps and is shared among threads
+    // The detach pool tracks PXN proxyOps that belong to other ranks, so it
+    // must be globally shared and large enough to buffer outstanding events.
     detachPool = (struct proxyOp *)calloc(detachPoolSize, sizeof(*detachPool));
     if (detachPool == NULL) {
       pthread_mutex_unlock(&lock);
@@ -110,10 +127,11 @@ __hidden ncclResult_t exampleProfilerInit(void** context, uint64_t commId, int* 
   }
   pthread_mutex_unlock(&lock);
 
-  // store pointer to activation mask globally
+  // Remember NCCL’s activation mask pointer so start/stop can toggle it later.
   eActivationMaskPtr = eActivationMask;
 
-  // pre-allocate memory for event object pools in dedicated profiler context
+  // Allocate a dedicated context per communicator so we can track events even
+  // when multiple NCCL communicators are profiled in parallel.
   struct context* ctx = (struct context *)calloc(1, sizeof(*ctx));
   ctx->commName = commName;
   ctx->commHash = commId;
@@ -171,6 +189,7 @@ fail:
   return ncclSystemError;
 }
 
+// Optional override provided by exampleProfilerStart(); falls back to env.
 static const char* profilerDumpFile;
 
 __hidden ncclResult_t exampleProfilerFinalize(void* context) {
@@ -185,9 +204,9 @@ __hidden ncclResult_t exampleProfilerFinalize(void* context) {
   }
   INFO(NCCL_INIT, "PROFILER/Plugin: finalize commName: %s commHash: %lu nranks: %d rank: %d", ctx->commName ? ctx->commName : "", ctx->commHash, ctx->nranks, ctx->rank);
 
-  // print last N groups/collectives/p2ps
-  // Note that since the v5 version of the profiler, group API events are now at the top of the hierarchy.
-  // Legacy Group events from v4 are still emitted for compatibility purposes when using the v4 profiler but excluded from this example.
+  // Emit the tail of each bounded pool. Pools act like ring buffers, so we
+  // only dump the most recent entries to keep the JSON small. Group API events
+  // sit at the top of the hierarchy in the v5 profiler.
   int start = (ctx->groupApiPoolIndex - groupApiPoolSize >= 0) ? ctx->groupApiPoolIndex - groupApiPoolSize : 0;
   int end = ctx->groupApiPoolIndex;
   for (int i = start; i < end; i++) {
@@ -200,6 +219,8 @@ __hidden ncclResult_t exampleProfilerFinalize(void* context) {
     printEvent(fh, &ctx->proxyCtrlPool[i%proxyCtrlPoolSize]);
   }
 
+  // Context-local allocations are per-communicator and freed regardless of
+  // whether we are dumping to disk.
   free(ctx->groupPool);
   free(ctx->collApiPool);
   free(ctx->p2pApiPool);
@@ -210,7 +231,8 @@ __hidden ncclResult_t exampleProfilerFinalize(void* context) {
   free(ctx->proxyCtrlPool);
   free(ctx);
 
-  // last thread cleans up shared detach pool
+  // Once the final communicator drops out, flush detached events and tear down
+  // the shared PXN buffer.
   if (__atomic_sub_fetch(&initialized, 1, __ATOMIC_RELAXED) == 0) {
     start = (detachPoolIndex - detachPoolSize >= 0) ? detachPoolIndex - detachPoolSize : 0;
     end = detachPoolIndex;
@@ -228,6 +250,9 @@ __hidden ncclResult_t exampleProfilerFinalize(void* context) {
 
 __hidden void updateEvent(void* handle);
 
+// Central dispatcher that hands out an event object for each NCCL runtime
+// callback. Each branch uses a bounded ring pool so the profiler never blocks
+// NCCL progress; if pools overflow we simply drop the event.
 __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, ncclProfilerEventDescr_t* eDescr) {
   *eHandle = NULL;
   struct context* ctx = (struct context *)context;
@@ -235,7 +260,8 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
     struct groupApi* event;
     int groupApiId = __atomic_fetch_add(&ctx->groupApiPoolIndex, 1, __ATOMIC_RELAXED);
     if ((groupApiId - __atomic_load_n(&ctx->groupApiPoolBase, __ATOMIC_RELAXED)) < groupApiPoolSize) {
-      // if there are available group API events grab one
+      // Reuse the next slot from the ring buffer and recycle any stale
+      // children that the previous owner might have left behind.
       event = &ctx->groupApiPool[groupApiId%groupApiPoolSize];
       // Make sure all child events of the picked group API event are cleared
       while (!profilerQueueEmpty(&event->collApiEvents)) {
@@ -253,7 +279,7 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
         __atomic_fetch_add(&ctx->kernelLaunchPoolBase, 1, __ATOMIC_RELAXED);
       }
     } else {
-      // else drop this event
+      // Pool overflow: undo the index bump and let NCCL continue without data.
       __atomic_fetch_sub(&ctx->groupApiPoolIndex, 1, __ATOMIC_RELAXED);
       return ncclSuccess;
     }
@@ -265,6 +291,7 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
     event->startTs = gettime() - startTime;
     *eHandle = event;
   } else if (eDescr->type == ncclProfileCollApi) {
+    // Parent group may be missing if that pool overflowed; skip in that case.
     if (eDescr->parentObj == NULL) return ncclSuccess;
     struct collApi* event;
     int collApiId = __atomic_fetch_add(&ctx->collApiPoolIndex, 1, __ATOMIC_RELAXED);
@@ -292,6 +319,7 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
     __atomic_fetch_add(&parent->refCount, 1, __ATOMIC_RELAXED);
     *eHandle = event;
   } else if (eDescr->type == ncclProfileP2pApi) {
+    // Drop silently when the parent group API event could not be recorded.
     if (eDescr->parentObj == NULL) return ncclSuccess;
     struct p2pApi* event;
     int p2pApiId = __atomic_fetch_add(&ctx->p2pApiPoolIndex, 1, __ATOMIC_RELAXED);
@@ -318,6 +346,7 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
     __atomic_fetch_add(&parent->refCount, 1, __ATOMIC_RELAXED);
     *eHandle = event;
   } else if (eDescr->type == ncclProfileKernelLaunch) {
+    // Kernel launches hang directly off the parent Group API event.
     if (eDescr->parentObj == NULL) return ncclSuccess;
     struct kernelLaunch* event;
     int kernelLaunchId = __atomic_fetch_add(&ctx->kernelLaunchPoolIndex, 1, __ATOMIC_RELAXED);
@@ -337,12 +366,16 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
     __atomic_fetch_add(&parent->refCount, 1, __ATOMIC_RELAXED);
     *eHandle = event;
   } else if (eDescr->type == ncclProfileGroup) {
+    // Legacy v4 Group events still exist for compatibility while v5 uses
+    // GroupApi as the root of the hierarchy.
     if (eDescr->parentObj == NULL) return ncclSuccess;
     struct group* event;
     int groupId = __atomic_fetch_add(&ctx->groupPoolIndex, 1, __ATOMIC_RELAXED);
     if ((groupId - __atomic_load_n(&ctx->groupPoolBase, __ATOMIC_RELAXED)) < groupPoolSize) {
       // if there are available group events grab one
       event = &ctx->groupPool[groupId%groupPoolSize];
+      // Drain any leftover collective/p2p tasks that were attached previously
+      // so their pool slots can be reused.
       while (!taskEventQueueEmpty(event)) {
         struct taskEventBase* base = taskEventQueueDequeue(event);
         if (base->type == ncclProfileColl) {
@@ -371,7 +404,7 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
     *eHandle = event;
     debugEvent(event, "GroupStart");
   } else if (eDescr->type == ncclProfileColl) {
-    // the parent might be null if we run out of events
+    // Parent Coll API might be null if its pool overflowed earlier.
     struct collApi* parent = (struct collApi *)eDescr->parentObj;
     if (parent == NULL) return ncclSuccess;
 
@@ -407,7 +440,7 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
     __atomic_fetch_add(&parent->refCount, 1, __ATOMIC_RELAXED);
     debugEvent(event, "CollStart");
   } else if (eDescr->type == ncclProfileP2p) {
-    // the parent might be null if we run out of events
+    // Parent P2P API might have been dropped when the pool reached capacity.
     struct p2pApi* parent = (struct p2pApi*) eDescr->parentObj;
     if (parent == NULL) return ncclSuccess;
 
@@ -439,6 +472,7 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
     __atomic_fetch_add(&parent->refCount, 1, __ATOMIC_RELAXED);
     debugEvent(event, "P2pStart");
   } else if (eDescr->type == ncclProfileProxyCtrl) {
+    // Proxy controller events are simple fire-and-forget records.
     int proxyCtrlId = __atomic_fetch_add(&ctx->proxyCtrlPoolIndex, 1, __ATOMIC_RELAXED);
     struct proxyCtrl* event = &ctx->proxyCtrlPool[proxyCtrlId%proxyCtrlPoolSize];
     event->type = ncclProfileProxyCtrl;
@@ -451,7 +485,8 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
     if (eventBase == NULL) return ncclSuccess;
 
     if (eDescr->proxyOp.pid != pid) {
-      // PXN captured proxyOp events
+      // PXN captured proxyOp events arrive from a different process, so they
+      // need to be staged in the detached pool until their parent is known.
       struct proxyOp* event;
       int detachId = __atomic_fetch_add(&detachPoolIndex, 1, __ATOMIC_RELAXED);
       if ((detachId - detachPoolBase) < detachPoolSize) {
@@ -560,6 +595,8 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
       debugEvent(event, "KernelChStart");
     }
   } else if (eDescr->type == ncclProfileNetPlugin) {
+    // Network plugin metadata piggybacks on proxy steps; record the transport-
+    // specific payload for later post-processing.
     struct proxyStep* parent = (struct proxyStep *)eDescr->parentObj;
     if (parent == NULL) return ncclSuccess;
 
@@ -607,6 +644,7 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
   return ncclSuccess;
 }
 
+// Recursively closes events once all children drain their reference counts.
 void updateEvent(void* handle) {
   uint64_t type = *(uint64_t *)handle;
   if (type == ncclProfileGroupApi) {
@@ -668,6 +706,8 @@ void updateEvent(void* handle) {
       // only for proxyOps that don't have a parent collective/p2p (i.e., PXN)
       int done = __atomic_add_fetch(&detachPoolDone, 1, __ATOMIC_RELAXED);
       if (done == detachPoolSize) {
+        // Once every detached slot has been consumed, advance the base so the
+        // ring buffer can start overwriting old PXN events.
         // reset the event completed (done) counter
         __atomic_store_n(&detachPoolDone, 0, __ATOMIC_RELAXED);
         // update the base pointer to the top of the pool
@@ -741,6 +781,9 @@ __hidden ncclResult_t exampleProfilerStopEvent(void* eHandle) {
   return ncclSuccess;
 }
 
+// NCCL surfaces intermediate milestones for long-running events; persist the
+// timestamp (and occasionally extra counters) so offline tooling can reconstruct
+// step-level timelines.
 __hidden ncclResult_t exampleProfilerRecordEventState(void* eHandle, ncclProfilerEventState_t eState, ncclProfilerEventStateArgs_t* eStateArgs) {
   // the event handle might be null if we run out of events
   if (eHandle == NULL) return ncclSuccess;
@@ -804,6 +847,7 @@ __hidden ncclResult_t exampleProfilerRecordEventState(void* eHandle, ncclProfile
   return ncclSuccess;
 }
 
+// Entry points exposed to NCCL when it loads the plugin.
 ncclProfiler_t ncclProfiler_v5 = {
   "Example-profiler",
   exampleProfilerInit,
