@@ -56,9 +56,7 @@ extern "C" {
 #include "nccl/types.h"
 }
 
-// ============================================================================
 // CUPTI Error Checking Macro
-// ============================================================================
 #ifndef CUPTI_API_CALL
 #define CUPTI_API_CALL(apiFunctionCall)                                             \
 do {                                                                                \
@@ -72,6 +70,20 @@ do {                                                                            
     }                                                                               \
 } while (0)
 #endif
+
+// Forward declarations
+static bool initProcessPool();
+static bool initJsonlTraceFile(const char* dirname);
+static bool initCuptiActivity();
+static void writeJsonlCuptiActivityRecord(uint32_t kind, uint64_t startTime, uint64_t endTime,
+                                          uint32_t correlationId, uint64_t externalCorrelationId,
+                                          uint32_t deviceId, const char* name, void* stream,
+                                          size_t size, const std::string& detailsJson);
+static void cleanupCuptiActivity();
+static void closeSharedJsonlFile();
+static std::string escapeJsonStringStd(const char* input);
+struct MyContext;
+
 
 // ============================================================================
 // SECTION 1: Configuration Constants
@@ -88,18 +100,6 @@ static const size_t BLACKLIST_CAP = 10000000;            // 10 million entries m
 
 // CUPTI activity record requested buffer sizing
 static const size_t CUPTI_BUFFER_SIZE = 1024 * 1024 * 8; // 8MB buffers
-
-// Forward declarations
-static bool initProcessPool();
-static bool initJsonlTraceFile(const char* dirname);
-static bool initCuptiActivity();
-static void writeJsonlCuptiActivityRecord(uint32_t kind, uint64_t startTime, uint64_t endTime,
-                                          uint32_t correlationId, uint64_t externalCorrelationId,
-                                          uint32_t deviceId, const char* name, void* stream,
-                                          size_t size, const std::string& detailsJson);
-static void cleanupCuptiActivity();
-static void closeSharedJsonlFile();
-static std::string escapeJsonStringStd(const char* input);
 
 
 // ============================================================================
@@ -201,14 +201,7 @@ static const char* getStateName(ncclProfilerEventState_v5_t eState) {
 // SECTION 3: Data Structures
 // ============================================================================
 
-// ----------------------------------------------------------------------------
-// Forward declarations for data structures
-// ----------------------------------------------------------------------------
-struct MyContext;
-
-// ----------------------------------------------------------------------------
 // MyEvent: Stores event data + parent reference
-// ----------------------------------------------------------------------------
 struct MyEvent {
   // Basic event info (set at START)
   uint64_t type;
@@ -234,9 +227,7 @@ struct MyEvent {
   bool hasExternalCorrelationId;    // Whether we successfully pushed an ID
 };
 
-// ----------------------------------------------------------------------------
 // BlacklistNode: Node for LRU linked list in Blacklist
-// ----------------------------------------------------------------------------
 struct BlacklistNode {
   void* address;           // The blacklisted address
   int refCount;            // Number of active children referencing this address
@@ -244,10 +235,8 @@ struct BlacklistNode {
   BlacklistNode* next;     // LRU list: next (newer)
 };
 
-// ----------------------------------------------------------------------------
 // Blacklist: Hash map + doubly linked list for O(1) LRU operations
 // Tracks addresses that cannot be reused because they are referenced as parents
-// ----------------------------------------------------------------------------
 struct Blacklist {
   std::unordered_map<void*, BlacklistNode*> map;  // O(1) lookup by address
   BlacklistNode* head;    // LRU end (oldest, evict from here)
@@ -380,10 +369,8 @@ struct Blacklist {
   }
 };
 
-// ----------------------------------------------------------------------------
 // EventPool: Round-robin allocation pool for events
 // Uses chunked allocation to avoid address reuse while maintaining cache locality
-// ----------------------------------------------------------------------------
 struct EventPool {
   // Chunked allocation: events are stored in multiple fixed-size chunks
   // Each chunk is allocated separately and remains valid until pool destruction
@@ -587,9 +574,7 @@ struct EventPool {
   }
 };
 
-// ----------------------------------------------------------------------------
 // MyContext: Per-communicator plugin state
-// ----------------------------------------------------------------------------
 struct MyContext {
   uint64_t commId;
   int rank;
@@ -641,8 +626,9 @@ static pthread_mutex_t poolBlacklistMutex = PTHREAD_MUTEX_INITIALIZER;
 static std::unordered_map<void*, MyContext*> contextRegistry;
 static pthread_mutex_t contextRegistryMutex = PTHREAD_MUTEX_INITIALIZER;
 
-static int activeContextCount = 0;           // Number of active communicators in this process
+static int activeContextCount = 0;  // Number of active communicators in this process
 
+// init process-wide resources (called when first communicator is initialized)
 static void initProcessResources(const char* dirname) {
   if (initProcessPool()) {
     fprintf(stdout, "[MinimalProfiler] Process pool initialized\n");
@@ -687,7 +673,7 @@ static void cleanupProcessResources() {
 }
 
 // ============================================================================
-// Section 5: PXN (PCI x NVLink)
+// Section 5: Process pool, blacklist, and PXN handling
 // ============================================================================
 // When PXN routing is enabled, some ProxyOp events may be executed by a different
 // process than the one that originated them. The parentObj pointer in such events
@@ -1114,10 +1100,6 @@ static void cleanupCuptiActivity() {
 // Section 7: Logging
 // ============================================================================
 
-// ----------------------------------------------------------------------------
-// Directory and File Helpers
-// ----------------------------------------------------------------------------
-
 // Get dump directory name (SLURM job ID or timestamp)
 static const char* getDumpDir(char* dirname, size_t dirname_size) {
   const char* slurm_job_id = getenv("SLURM_JOB_ID");
@@ -1171,10 +1153,7 @@ static int ensureDumpDir(const char* dirname) {
   return 0;
 }
 
-// ----------------------------------------------------------------------------
 // JSON/JSONL Utility Functions
-// ----------------------------------------------------------------------------
-
 static std::string escapeJsonStringStd(const char* input) {
   if (!input) return "";
   
@@ -1241,12 +1220,9 @@ static void closeSharedJsonlFile() {
   }
 }
 
-// ----------------------------------------------------------------------------
 // JSONL Writers - Separate Records for Events and States and CUPTI records
-// ----------------------------------------------------------------------------
 // - "event" records: written at STOP time with start/stop info and details
 // - "state" records: written immediately at STATE time with eventAddr reference
-// ----------------------------------------------------------------------------
 
 // Write an event record to JSONL (called at STOP time - no state transitions)
 static void writeJsonlEventRecord(MyEvent* event) {
@@ -1460,9 +1436,7 @@ static void writeJsonlCuptiActivityRecord(uint32_t kind, uint64_t startTime, uin
 // ============================================================================
 extern "C" {
 
-// ----------------------------------------------------------------------------
 // myInit: Initialize profiler context for a communicator
-// ----------------------------------------------------------------------------
 ncclResult_t myInit(void** context, uint64_t commId, int* eActivationMask,
                     const char* commName, int nNodes, int nranks, int rank,
                     ncclDebugLogger_t logfn) {
@@ -1517,9 +1491,7 @@ ncclResult_t myInit(void** context, uint64_t commId, int* eActivationMask,
   return ncclSuccess;
 }
 
-// ----------------------------------------------------------------------------
 // myStartEvent: Begin tracking a profiler event
-// ----------------------------------------------------------------------------
 ncclResult_t myStartEvent(void* context, void** eHandle, 
                           ncclProfilerEventDescr_v5_t* eDescr) {
   double startTime = getTime();
@@ -1688,9 +1660,7 @@ ncclResult_t myStartEvent(void* context, void** eHandle,
   return ncclSuccess;
 }
 
-// ----------------------------------------------------------------------------
 // myStopEvent: End tracking a profiler event
-// ----------------------------------------------------------------------------
 ncclResult_t myStopEvent(void* eHandle) {
   if (!eHandle) return ncclSuccess;
   
@@ -1716,9 +1686,7 @@ ncclResult_t myStopEvent(void* eHandle) {
   return ncclSuccess;
 }
 
-// ----------------------------------------------------------------------------
 // myRecordEventState: Record state transitions during event lifecycle
-// ----------------------------------------------------------------------------
 ncclResult_t myRecordEventState(void* eHandle, 
                                  ncclProfilerEventState_v5_t eState,
                                  ncclProfilerEventStateArgs_v5_t* eStateArgs) {
@@ -1754,9 +1722,7 @@ ncclResult_t myRecordEventState(void* eHandle,
   return ncclSuccess;
 }
 
-// ----------------------------------------------------------------------------
 // myFinalize: Clean up profiler context for a communicator
-// ----------------------------------------------------------------------------
 ncclResult_t myFinalize(void* context) {
   MyContext* ctx = static_cast<MyContext*>(context);
   pid_t tid = getTid();
